@@ -1,0 +1,2781 @@
+---
+title: "HCC_proteome"
+output: 
+  html_document: default
+    df_print: paged
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+###CPTAC proteome
+
+```{r}
+library(dplyr)
+prodata <- data.table::fread("./S049_Liver_Cancer_Gao2019/Liver_Cancer_Proteome_CDAP_Protein_Report.r1/Zhou_Liver_Cancer_Proteome.tmt11.tsv", header = T)%>% as.data.frame()
+rt <- prodata[!duplicated(prodata$Gene),]
+rownames(rt)<-rt[,1]
+rt<-rt[,-1]
+rt=as.matrix(rt)
+
+selectCol=seq(2,ncol(rt),2) 
+rt=rt[,selectCol]
+
+hcc_data <- as.data.frame(rt)
+openxlsx::write.xlsx(hcc_data,file="hcc_prodata2.xlsx", rowNames = T, colName = T)
+```
+
+
+###TCGA_data
+```{r}
+library(limma)
+library(tibble)
+HCC_data <- data.table::fread("C:/Users/64684/Documents/R/LIHC/TCGA_LIHCdata/TCGA_HCC_FPKM.txt", header = T)
+Normal_data <- data.table::fread("C:/Users/64684/Documents/R/LIHC/TCGA_LIHCdata/TCGA_Normal_FPKM.txt", header = T)
+
+HCC_matrix <- merge(HCC_data, Normal_data, by="GeneSymbol")
+HCC_matrix <- column_to_rownames(HCC_matrix, var = "GeneSymbol")
+
+groups <- c(rep("TT",369), rep("NAT",50))
+
+design<- model.matrix(~0+factor(groups))
+colnames(design)<- levels(factor(groups))
+
+fit <- lmFit(HCC_matrix, design)
+
+cont.matrix <- makeContrasts('TT-NAT', levels = design) 
+fit2 <- contrasts.fit(fit, cont.matrix)
+fit2 <- eBayes(fit2)
+
+output <- topTable(fit2, coef = 1, number = Inf, adjust.method = 'BH')
+write.csv(output, file = "LIHC_DEGs.csv",row.names = T)
+
+
+```
+
+
+##HCC_proteome
+###Tumor tissue vs peritumor tissue
+#### Lollipop chart
+```{r}
+library(dplyr)
+library(ggplot2)
+library(hrbrthemes)
+library(ggpubr)
+no.data <- openxlsx::read.xlsx("./2022MBR/Proteome_MBR.xlsx", sheet = 3)
+lollipop <- no.data[,c(4:6)]
+
+g <- ggplot(lollipop) +
+  geom_segment(aes(x=SampleID, xend=SampleID, y=Peritumor, yend=Tumor),
+               color="grey") +
+  geom_point(aes(x=SampleID, y=Peritumor), color="#2c83b7", size=2 ) +
+  geom_point(aes(x=SampleID, y=Tumor), color="#c2395a", size=2 ) +
+  theme(legend.position = "none") +
+  theme_classic() + ylim(5000,8000)+
+  xlab("Paired tumor and peritumor samples (n = 39)") +
+  ylab("Number of protein identifications")
+
+plotdata <- no.data[,c(1:3)]
+
+p <- ggplot(plotdata, aes(x = SampleID, y = No.)) + 
+  geom_point(aes(color = Groups), size=2) + 
+  geom_smooth(aes(color = Groups))+
+  theme_classic() + ylim(5000,8000)+
+  theme(legend.position = "none") +
+  xlab("Paired tumor and peritumor samples (n = 39)") +
+  ylab("Number of protein identifications")
+
+b <- ggplot(plotdata, aes(x = Groups, y = No.)) + 
+  geom_jitter(aes(color = Groups), size=1, width = 0.3)+
+  geom_boxplot(aes(color = Groups), size=1) + 
+  scale_color_manual(values=c(Peritumor = "#2c83b7", Tumor = "#c2395a"))+
+  stat_compare_means()+
+  theme_classic() + ylim(5000,8000)+
+  theme(legend.position = "none") +
+  xlab("") +
+  ylab("Number of protein identifications")
+
+```
+
+#### Venn graph
+```{r}
+library(VennDiagram)
+library(grDevices)
+library(dplyr)
+filedata <- openxlsx::read.xlsx("./2022MBR/Venn/Venngene_list.xlsx", sheet = 1)%>%as.data.frame()
+p <- venn.diagram(
+     list(CPTAC=filedata$CPTAC, This_Study=filedata$This.Study), 
+     na = "remove", filename = NULL,  col = "black", lty = 1, lwd = 3,
+     fill = c("cornflowerblue", "darkorchid1"), alpha = 0.50, cex = 2.0,
+     fontfamily = "serif", fontface = "bold",
+     cat.col = c("cornflowerblue", "darkorchid4"), cat.cex = 1.8,
+     cat.fontface = "bold",  cat.fontfamily = "serif")
+
+pdf(file="2quadruple_Venn.pdf")
+grid.draw(p)
+dev.off()
+
+pt <- venn.diagram(
+     list(Tumor=filedata$Tumor, Peritumor=filedata$Peritumor), 
+     na = "remove", filename = NULL,  lty = 1, lwd = 3,
+     col = c('#c2395a', '#2c83b7'), alpha = 0.50, cex = 2.0,
+     fontfamily = "serif", fontface = "bold",
+     cat.col = c('#c2395a', '#2c83b7'), cat.cex = 1.8,
+     cat.fontface = "bold",  cat.fontfamily = "serif")
+
+pdf(file="2PTvsTT_Venn.pdf")
+grid.draw(pt)
+dev.off()
+```
+
+#### Metabolites Count Pieplot
+```{r}
+library(ggplot2)
+library(RColorBrewer)
+metabolite_data <- openxlsx::read.xlsx("./2022ProteomeMetabolism/Metabolites2023.xlsx", sheet = 1, rowNames = F)
+
+count <- as.data.frame(table(metabolite_data$Super_Class))
+write.csv(count, file = "Metablites_class.csv", row.names = F)
+
+count <- read.csv("./2022ProteomeMetabolism/Metablites_class.csv")
+count <- count[order(count$Var1, decreasing = TRUE),]
+
+p <- ggplot(data = count, mapping = aes(x = '', y = Freq, fill = Var1)) +
+  geom_bar(stat = 'identity', position = 'stack', width = 1)+
+  coord_polar(theta = 'y')
+
+label_value <- paste('(', round(count$Freq/sum(count$Freq) * 100, 2), '%)', 
+                     sep = '')
+label_value
+
+label <- paste(count$Var1, label_value, sep = '')
+##blank theme
+blank_theme <- theme_minimal()+
+  theme(
+  axis.title.x = element_blank(),
+  axis.title.y = element_blank(),
+  panel.border = element_blank(),
+  panel.grid=element_blank(),
+  axis.ticks = element_blank(),
+  plot.title=element_text(size=5, face="bold")
+  )
+g <- p + scale_fill_brewer(palette = "Paired")+
+     labs(x = '', y = '', title = '') + blank_theme +
+     theme(legend.position = "none") + 
+     theme(axis.text.x=element_blank()) +
+     geom_text(aes(y = count$Freq/5 +
+                     c(0,cumsum(count$Freq)[-length(count$Freq)]),
+                   x = sum(count$Freq)/600, label = label)) 
+
+```
+
+##### Venn graph of metabolites
+```{r}
+library(VennDiagram)
+library(grDevices)
+library(dplyr)
+filedata <- openxlsx::read.xlsx("./2022ProteomeMetabolism/Metabolites2023.xlsx", sheet = 4)%>%as.data.frame()
+p <- venn.diagram(
+     list(Negative=filedata$Negative, Positive=filedata$Positive), 
+      na = "remove", filename = NULL,  lty = 1, lwd = 3,
+     col = c('#c2395a', '#2c83b7'), alpha = 0.50, cex = 2.0,
+     fontfamily = "serif", fontface = "bold",
+     cat.col = c('#c2395a', '#2c83b7'), cat.cex = 1.8,
+     cat.fontface = "bold",  cat.fontfamily = "serif")
+
+pdf(file="2quadruple_metabolites.pdf")
+grid.draw(p)
+dev.off()
+
+```
+
+####Lipid Count Pieplot
+```{r}
+library(ggplot2)
+library(RColorBrewer)
+lipid_data <- openxlsx::read.xlsx("./2022ProteomeMetabolism/Lipid2023.xlsx", sheet = 1, rowNames = F)
+
+count <- as.data.frame(table(lipid_data$Category))
+write.csv(count, file = "Lipid_class.csv", row.names = F)
+
+count <- read.csv("./2022ProteomeMetabolism/Lipid_class.csv")
+count <- count[order(count$Var1, decreasing = TRUE),]
+
+p <- ggplot(data = count, mapping = aes(x = '', y = Freq, fill = Var1)) +
+  geom_bar(stat = 'identity', position = 'stack', width = 1)+
+  coord_polar(theta = 'y')
+
+label_value <- paste('(', round(count$Freq/sum(count$Freq) * 100, 2), '%)', 
+                     sep = '')
+label_value
+
+label <- paste(count$Var1, label_value, sep = '')
+##blank theme
+blank_theme <- theme_minimal()+
+  theme(
+  axis.title.x = element_blank(),
+  axis.title.y = element_blank(),
+  panel.border = element_blank(),
+  panel.grid=element_blank(),
+  axis.ticks = element_blank(),
+  plot.title=element_text(size=5, face="bold")
+  )
+g <- p + scale_fill_brewer(palette = "Set1")+
+     labs(x = '', y = '', title = '') + blank_theme +
+     theme(legend.position = "none") + 
+     theme(axis.text.x=element_blank()) +
+     geom_text(aes(y = count$Freq/10 +
+                     c(0,cumsum(count$Freq)[-length(count$Freq)]),
+                   x = sum(count$Freq)/2000, label = label)) 
+
+```
+
+##### Venn graph of lipids
+```{r}
+library(VennDiagram)
+library(grDevices)
+library(dplyr)
+filedata <- openxlsx::read.xlsx("./2022ProteomeMetabolism/Lipid2023.xlsx", sheet = 4)%>%as.data.frame()
+p <- venn.diagram(
+     list(Negative=filedata$Negative, Positive=filedata$Positive), 
+      na = "remove", filename = NULL,  lty = 1, lwd = 3,
+     col = c('#c2395a', '#2c83b7'), alpha = 0.50, cex = 2.0,
+     fontfamily = "serif", fontface = "bold",
+     cat.col = c('#c2395a', '#2c83b7'), cat.cex = 1.8,
+     cat.fontface = "bold",  cat.fontfamily = "serif")
+
+pdf(file="2quadruple_lipids.pdf")
+grid.draw(p)
+dev.off()
+
+```
+
+####Lipid Count Boxplot
+```{r}
+library(ggplot2)
+library(ggpubr)
+data <- openxlsx::read.xlsx("./2022ProteomeMetabolism/Lipid_merge_Rawdata.xlsx", sheet = 2)
+
+p <- ggplot(data, aes(x=Segments, y=No., color=Groups))+
+  geom_boxplot()+
+  scale_color_manual(values=c(TT="#c2395a", PT="#2c83b7"))+
+  theme_classic()+
+  theme(legend.position = "right", 
+        legend.key.height = unit(0.3,'cm'),
+        legend.key.width = unit(0.3,'cm'))+
+  xlab("Segments") + ylab("Numbers of Detected Lipids")
+
+
+```
+
+####Proteome_PCA
+```{r}
+library(FactoMineR)
+library(ggplot2)
+library(dplyr)
+prodata <- openxlsx::read.xlsx("./2022proteome/2022Proteome.xlsx", sheet = 1,rowNames = T)
+
+plotdata <- as.data.frame(t(log2(prodata)))
+
+prodata.pca <- PCA(plotdata, ncp = 2, scale.unit = TRUE, graph = FALSE)
+
+plot(prodata.pca)
+
+pca_data <- data.frame(prodata.pca$ind$coord[,1:2])
+
+pca_eig1 <- round(prodata.pca$eig[1,2], 2)
+pca_eig2 <- round(prodata.pca$eig[2,2], 2)
+
+groups <- as.data.frame(c(rep("NAT",39), rep("TT",39)))
+names(groups) <- "Groups"
+
+pca_data <- cbind(pca_data, groups)
+pca_data$SampleID <- rownames(pca_data)
+
+p <- ggplot(data = pca_data, aes(x = Dim.1, y = Dim.2)) +
+  geom_point(aes(color = Groups), size = 1) +
+  scale_color_manual(values = c('#2c83b7', '#c2395a')) + 
+  theme_bw() +
+  theme(legend.position = "none",
+        panel.grid=element_blank(),
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 14)) +
+  labs(x =  paste('PCA1:', pca_eig1, '%'), 
+       y = paste('PCA2:', pca_eig2, '%'), color = '')
+
+g <- p + stat_ellipse(aes(fill = Groups), geom = 'polygon', level = 0.95, 
+                 alpha = 0.1, show.legend = FALSE) +
+    scale_fill_manual(values = c('#2c83b7', '#c2395a'))
+
+
+```
+
+#### Metabolomics OPLS-DA
+```{r}
+library(ropls)
+Metabolite_data <- openxlsx::read.xlsx("./2022ProteomeMetabolism/Metabolites2023.xlsx", sheet = 1,rowNames = T)
+
+group <- openxlsx::read.xlsx("./2022proteome/Clinicaldata2.xlsx", sheet = 2,rowNames = F)
+##PCA analysis
+Metabolite.pca <- opls(t(log2(Metabolite_data[,-c(1:12)])))
+
+plot(Metabolite.pca,
+     typeVc = "x-score",
+     parAsColFcVn = group$Groups,
+     parPaletteVc = c("#2c83b7", "#c2395a"))
+
+##PLS-DA
+pdf("Metabolite_plsda.pdf")
+lipid.plsda <- opls(t(log2(Metabolite_data)), group$Groups)
+dev.off()
+
+plot(Metabolite.pca,
+     typeVc = "x-score",
+     parAsColFcVn = group$Groups,
+     parPaletteVc = c("#2c83b7", "#c2395a"))
+
+## OPLS-DA
+pdf("Metabolite_oplsda.pdf")
+Metabolite.oplsda <- opls(t(log2(Metabolite_data[,-c(1:12)])), group$Groups, predI = 1, orthoI = NA)
+dev.off()
+
+plot(Metabolite.oplsda,
+     typeVc = "x-score",
+     parAsColFcVn = group$Groups,
+     parPaletteVc = c("#2c83b7", "#c2395a"))
+```
+
+#####ggplot2
+```{r}
+library(ggplot2)
+library(ggsci)
+library(tidyverse)
+
+sample.score = Metabolite.oplsda@scoreMN %>%  
+  as.data.frame() %>%
+  mutate(group = group$Groups,
+         o1 = Metabolite.oplsda@orthoScoreMN[,1]) 
+head(sample.score)
+
+p <- ggplot(sample.score, aes(p1, o1, color = group)) +
+  geom_hline(yintercept = 0, linetype = 'dashed', size = 0.5) + 
+  geom_vline(xintercept = 0, linetype = 'dashed', size = 0.5) +
+  geom_point() +
+  #geom_point(aes(-10,-10), color = 'white') +
+  labs(x = 'OPLS-DA:t1(6.0%)',y = 'OPLS-DA:to1') +
+  stat_ellipse(level = 0.95, linetype = 'solid', 
+               size = 1, show.legend = FALSE) + 
+  scale_color_manual(values = c('#2c83b7','#c2395a')) +
+  theme_bw() +
+  theme(legend.position = c(0.92,0.92),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 12),
+        panel.background = element_blank(),
+        panel.grid = element_blank(),
+        axis.text = element_text(size = 14),
+        axis.title = element_text(size = 16))
+```
+
+#### Lipidomics OPLS-DA
+```{r}
+library(ropls)
+Lipid_data <- openxlsx::read.xlsx("./2022ProteomeMetabolism/Lipid2023.xlsx", sheet = 1,rowNames = T)
+
+group <- openxlsx::read.xlsx("./2022proteome/Clinicaldata2.xlsx", sheet = 2,rowNames = F)
+
+## OPLS-DA
+pdf("Lipid_data_oplsda.pdf")
+Lipid.oplsda <- opls(t(log2(Lipid_data[,-1])), group$Groups, predI = 1, orthoI = NA)
+dev.off()
+
+plot(Lipid.oplsda,
+     typeVc = "x-score",
+     parAsColFcVn = group$Groups,
+     parPaletteVc = c("#2c83b7", "#c2395a"))
+```
+#####ggplot2 
+```{r}
+library(ggplot2)
+library(ggsci)
+library(tidyverse)
+sample.score = Lipid.oplsda@scoreMN %>% 
+  as.data.frame() %>%
+  mutate(group = group$Groups,
+         o1 = Lipid.oplsda@orthoScoreMN[,1]) 
+head(sample.score)
+
+p <- ggplot(sample.score, aes(p1, o1, color = group)) +
+  geom_hline(yintercept = 0, linetype = 'dashed', size = 0.5) + 
+  geom_vline(xintercept = 0, linetype = 'dashed', size = 0.5) +
+  geom_point() +
+  #geom_point(aes(-10,-10), color = 'white') +
+  labs(x = 'OPLS-DA:t1(6.0%)',y = 'OPLS-DA:to1') +
+  stat_ellipse(level = 0.95, linetype = 'solid', 
+               size = 1, show.legend = FALSE) + 
+  scale_color_manual(values = c('#2c83b7','#c2395a')) +
+  theme_bw() +
+  theme(legend.position = c(0.92,0.92),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 12),
+        panel.background = element_blank(),
+        panel.grid = element_blank(),
+        axis.text = element_text(size = 14),
+        axis.title = element_text(size = 16))
+```
+
+##### Indentifing the DALs and DAMs
+```{r}
+lipid.vip <- as.data.frame(getVipVn(Metabolite.oplsda))
+write.csv(lipid.vip, file = "Metabolite_VIP.csv", row.names = T)
+
+```
+
+#### Liver specific proteins
+```{r}
+library(tibble)
+library(reshape2)
+library(ggplot2)
+library(ggpubr)
+prodata <- openxlsx::read.xlsx("./2022proteome/2022Proteome.xlsx", sheet = 1,rowNames = F)
+
+proteinlist <- openxlsx::read.xlsx("./2022MBR_filter/Liver_specific_genes.xlsx", sheet = 1,rowNames = F)
+proteinlist <- as.data.frame(proteinlist[,1])
+names(proteinlist) <- "Name"
+specific_protein_exp <- merge(proteinlist, prodata, by="Name")
+specific_protein_exp <- column_to_rownames(specific_protein_exp, var = "Name")
+ 
+plotdata <- as.data.frame(t(log2(specific_protein_exp+1)))
+groups <- as.data.frame(c(rep("NAT",39), rep("TT",39))) 
+names(groups) <- "Groups"
+
+plotdata <- cbind(groups, plotdata)
+
+data <- melt(plotdata, id.vars = "Groups")
+
+p <- ggplot(data, aes(x=Groups, y=value, color=Groups))+geom_boxplot()+
+  scale_color_manual(values=c(NAT = "#2c83b7", TT = "#c2395a"))+
+  stat_compare_means()+
+  theme_classic()+ 
+  ylab("Log2(Normalized expression value)")+
+  xlab("Liver specific proteins")+
+  theme(legend.position = "none",
+        panel.grid=element_blank(),
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 14))
+```
+
+#### metabolite-interacting proteins (MIPros)
+```{r}
+library(tibble)
+library(reshape2)
+library(ggplot2)
+library(ggpubr)
+prodata <- openxlsx::read.xlsx("./2022proteome/2022Proteome.xlsx", sheet = 1,rowNames = F)
+
+proteinlist <- openxlsx::read.xlsx("./2022MBR_filter/MIPros_list.xlsx", sheet = 2,rowNames = F)
+
+MIPros_exp <- merge(proteinlist, prodata, by="Name")
+MIPros_exp <- column_to_rownames(MIPros_exp, var = "Name")
+ 
+plotdata <- as.data.frame(t(log2(MIPros_exp+1)))
+groups <- as.data.frame(c(rep("NAT",39), rep("TT",39))) 
+names(groups) <- "Groups"
+
+plotdata <- cbind(groups, plotdata)
+
+data <- melt(plotdata, id.vars = "Groups")
+
+p <- ggplot(data, aes(x=Groups, y=value, color=Groups))+
+  geom_boxplot(outlier.size = 0.5,alpha=0.5)+
+  scale_color_manual(values=c(NAT = "#2c83b7", TT = "#c2395a"))+
+  stat_compare_means()+
+  theme_classic()+ 
+  ylab("Log2(Normalized expression value)")+
+  xlab("Proteins assigned to metabolic pathways")+
+  theme(legend.position = "none",
+        panel.grid=element_blank(),
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 14))
+```
+
+#### DEP in Tumor vs NAT
+```{r}
+library(dplyr)
+library(limma)
+prodata <- openxlsx::read.xlsx("./2022proteome/2022Proteome.xlsx", sheet = 1,rowNames = T)
+
+groups <- c(rep("NAT",39), rep("TT",39))
+
+design<- model.matrix(~0+factor(groups))
+colnames(design)<- levels(factor(groups))
+##voom transform
+v <- voom(prodata, design, plot=TRUE)
+
+fit <- lmFit(v, design)
+
+cont.matrix <- makeContrasts('TT-NAT', levels = design) 
+fit2 <- contrasts.fit(fit, cont.matrix)
+fit2 <- eBayes(fit2)
+
+output <- topTable(fit2, coef = 1, number = Inf, adjust.method = 'BH')
+write.csv(output, file = "Proteome_DEGs_limmavoom2.csv",row.names = T)
+
+```
+
+>metabolites
+
+```{r}
+library(dplyr)
+library(limma)
+lipid_data <- openxlsx::read.xlsx("./2022ProteomeMetabolism/Metabolites2023.xlsx", sheet = 1,rowNames = T)%>% as.data.frame()
+
+group <- openxlsx::read.xlsx("./2022MBR/Clinicaldata.xlsx", sheet = 3, rowNames = T)
+design<- model.matrix(~0+factor(group$Groups))
+colnames(design)<- levels(factor(group$Groups))  
+
+v <- voom(lipid_data[,-1], design, plot=TRUE)
+v <- voom(lipid_data[,-c(1:12)], design, plot=TRUE)
+
+fit <- lmFit(v, design)
+
+cont.matrix <- makeContrasts('TT-NAT', levels = design) 
+fit2 <- contrasts.fit(fit, cont.matrix)
+fit2 <- eBayes(fit2)
+
+output <- topTable(fit2, coef = 1, number = Inf, adjust.method = 'BH')
+write.csv(output, file = "Metabolite_limmavoom.csv",row.names = T)
+```
+
+
+#### Volcano plot
+```{r}
+library(ggplot2)
+library(ggrepel)
+names(output) <- c('log2FC', 'AveExpr', 't', 'Pvalue', 'BH-Pvalue', 'B')
+yanse <- ifelse(output$`BH-Pvalue`<0.01 & abs(output$log2FC)>= 1, ifelse(output$log2FC> 1,'red','gray'),'green')
+p <- ggplot(output, aes(output$log2FC, -log10(output$`BH-Pvalue`), col=yanse))
+g <- p+geom_point(size=0.5)+theme_bw()+ 
+  scale_color_manual(values = c('#2c83b7','grey60','#c2395a'))+ 
+  labs(x="log2 (Fold Change)",y="-log10 (BH-Pvalue)") +
+  geom_hline(yintercept = -log10(0.05), lty=4,col="grey",lwd=0.6) +
+  geom_vline(xintercept = c(-1, 1), lty=4,col="grey",lwd=0.6) +
+  xlim(-5,5)+
+  theme(legend.position = "none",
+        panel.grid=element_blank(),
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 14))
+##label
+label <- ifelse(-log10(output$`BH-Pvalue`) > 10 & abs(output$log2FC) >= 2, rownames(output),"")
+
+l <- g+geom_text_repel(data=output, aes(x = output$log2FC, 
+                                   y = -log10(output$`BH-Pvalue`), 
+                                   label = label),
+                  size = 3,box.padding = unit(0.2, "lines"),
+                  segment.color = "black", 
+                  show.legend = FALSE)
+
+```
+
+####heatmap of DEPs in TT vs PT
+```{r}
+library(ComplexHeatmap)
+library(tibble)
+library(dplyr)
+DEP_list <- openxlsx::read.xlsx("./Proteome_DEGs_limmavoom.xlsx", sheet = 3)
+DEP_list <- DEP_list[,1]%>%as.data.frame()
+names(DEP_list) <- "Name"
+
+prodata <- openxlsx::read.xlsx("./2022proteome/2022Proteome.xlsx", sheet = 1,rowNames = F)
+
+#prodata <- rownames_to_column(prodata, var = "Name")
+
+DEP_exp <- merge(DEP_list, prodata, by="Name", sort = F)
+DEP_exp <- column_to_rownames(DEP_exp, var = "Name")
+
+plotdata <- as.data.frame(t(scale(log2(t(DEP_exp)))))
+
+groups <- openxlsx::read.xlsx("./2022MBR/Clinicaldata.xlsx", sheet = 3)
+
+mark_gene <- openxlsx::read.xlsx("./Proteome_DEGs_limmavoom.xlsx", sheet = 4)%>%as.data.frame()
+
+row_anno <-  rowAnnotation(link = anno_mark(at = which(rownames(plotdata) 
+                                                       %in% mark_gene$Name), 
+                                       labels = mark_gene$Name,
+                           labels_gp = gpar(fontsize = 6)))
+
+ht = HeatmapAnnotation(Cluster = groups$Groups,
+                       show_legend = F,
+                       col = list(Cluster = c("NAT" = "#2c83b7",
+                                               "TT"   = "#c2395a")))
+col_fun = circlize::colorRamp2(c(-4, -2, 0, 2, 4),
+                               c("#2c83b7","deepskyblue1", "white",
+                                 "red", "#c2395a"))
+
+p <- Heatmap(plotdata, 
+             col = col_fun,
+             top_annotation = ht,
+             show_row_names = F,
+             show_row_dend = F,
+             show_column_dend = F,
+             show_column_names = F,
+             cluster_columns = F,
+             cluster_rows = F,
+             heatmap_legend_param = list(title = "Zscore"))
+p+row_anno
+```
+
+>metabolites
+
+```{r}
+library(ComplexHeatmap)
+library(tibble)
+metabolites_exp <- openxlsx::read.xlsx("./2022ProteomeMetabolism/Metabolites2.xlsx", sheet = 2)
+metabolites_list <- openxlsx::read.xlsx("./2022ProteomeMetabolism/Metabolites_limmavoom.xlsx", sheet = 2)
+
+metabolites_list <- as.data.frame(metabolites_list[,1])
+names(metabolites_list) <- "Name"
+
+DEM_exp <- merge(metabolites_list, metabolites_exp, sort = F, by="Name")
+DEM_exp <- column_to_rownames(DEM_exp, var = "Name")
+
+plotdata <- as.data.frame(t(scale(t(log2(DEM_exp+1)))))
+
+groups <- openxlsx::read.xlsx("./2022MBR/Clinicaldata.xlsx", sheet = 3)
+
+ht = HeatmapAnnotation(Cluster = groups$Groups,
+                        show_legend = F,
+                        col = list(Cluster = c("NAT" = "#2c83b7",
+                                               "TT" = "#c2395a")))
+
+col_fun = circlize::colorRamp2(c(-4, -2, 0, 2, 4),
+                               c("#2c83b7","deepskyblue1", "white",
+                                 "red", "#c2395a"))
+marker <- openxlsx::read.xlsx("./2022ProteomeMetabolism/Metabolites_limmavoom.xlsx", sheet = 3)%>%as.data.frame()
+
+row_anno <-  rowAnnotation(link = anno_mark(at = which(rownames(plotdata) 
+                                                       %in% marker$Name), 
+                                       labels = marker$Name,
+                           labels_gp = gpar(fontsize = 6)))
+
+p <- Heatmap(plotdata, 
+             col = col_fun,
+             top_annotation = ht, 
+             show_row_names = F,
+             show_row_dend = F,
+             show_column_dend = F,
+             show_column_names = F,
+             cluster_columns = F,
+             cluster_rows = F,
+             row_names_gp = gpar(fontsize = 6),
+             heatmap_legend_param = list(title = "Zscore", 
+                                         direction = "horizontal"))
+
+p+row_anno
+```
+
+>lipids
+
+```{r}
+library(ComplexHeatmap)
+library(tibble)
+lipid_exp <- openxlsx::read.xlsx("./2022ProteomeMetabolism/Lipid2023.xlsx", sheet = 1)
+lipid_list <- openxlsx::read.xlsx("./2022ProteomeMetabolism/Lipids_DAL_VIP.xlsx", sheet = 2)
+
+lipid_list <- as.data.frame(lipid_list[,1])
+names(lipid_list) <- "Name"
+
+DEM_exp <- merge(lipid_list, lipid_exp, sort = F, by="Name")
+DEM_exp <- column_to_rownames(DEM_exp, var = "Name")
+
+plotdata <- as.data.frame(t(scale(t(log2(DEM_exp[,-1]+1)))))
+
+groups <- openxlsx::read.xlsx("./2022MBR/Clinicaldata.xlsx", sheet = 3)
+
+ht = HeatmapAnnotation(Cluster = groups$Groups,
+                        show_legend = F,
+                        col = list(Cluster = c("NAT" = "#2c83b7",
+                                               "TT" = "#c2395a")))
+
+col_fun = circlize::colorRamp2(c(-4, -2, 0, 2, 4),
+                               c("#2c83b7","deepskyblue1", "white",
+                                 "red", "#c2395a"))
+marker <- openxlsx::read.xlsx("./2022ProteomeMetabolism/Lipids_DAL_VIP.xlsx", sheet = 3)%>%as.data.frame()
+
+row_anno <-  rowAnnotation(link = anno_mark(at = which(rownames(plotdata) 
+                                                       %in% marker$Name), 
+                                       labels = marker$Name,
+                           labels_gp = gpar(fontsize = 6)))
+
+p <- Heatmap(plotdata, 
+             col = col_fun,
+             top_annotation = ht, 
+             show_row_names = F,
+             show_row_dend = F,
+             show_column_dend = F,
+             show_column_names = F,
+             cluster_columns = F,
+             cluster_rows = F,
+             row_names_gp = gpar(fontsize = 6),
+             heatmap_legend_param = list(title = "Zscore", 
+                                         direction = "horizontal"))
+
+p+row_anno
+```
+
+### Metascale anotation
+```{r}
+library(ggplot2)
+
+Tumor.data <- openxlsx::read.xlsx("./2022proteome/TTvsNAT-metascape.xlsx", sheet = 1)
+
+tt <- ggplot(Tumor.data, aes(y = reorder(factor(Description), `-Log(q-value)`),
+                             x = `-Log(q-value)`)) + 
+  geom_bar(stat = 'identity', fill = '#c2395a', width = 0.7)+
+  xlab("")+ylab("-log10(q-value)")+
+  theme_classic() +
+  theme(legend.position ="",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 10),
+        panel.background = element_blank(),
+        panel.grid = element_blank(),
+        axis.text = element_text(size = 12),
+        axis.title = element_text(size = 14))
+
+NAT.data <- openxlsx::read.xlsx("./2022proteome/TTvsNAT-metascape.xlsx", sheet = 2)
+
+nat <- ggplot(NAT.data, aes(x = reorder(factor(Description), `-Log(q-value)`),
+                            y = `-Log(q-value)`)) + 
+     geom_bar(stat = 'identity', fill = "#2c83b7", width = 0.7) +
+     xlab("")+ylab("-log10(p-value)")+
+     coord_flip()+
+     theme_classic() +
+     theme(legend.position ="",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 10),
+        panel.background = element_blank(),
+        panel.grid = element_blank(),
+        axis.text = element_text(size = 12),
+        axis.title = element_text(size = 14))
+
+c2 <- ggplot(cluster2, aes(x = reorder(factor(Description), LogP), y = LogP)) + 
+  geom_bar(stat = 'identity', fill = '#0f4392', width = 0.7)+
+  xlab("")+ylab("-log10(p-value)")+
+  coord_flip()+
+  theme_classic() +
+  theme(legend.position ="",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 10),
+        panel.background = element_blank(),
+        panel.grid = element_blank(),
+        axis.text = element_text(size = 12),
+        axis.title = element_text(size = 14))
+
+```
+
+#### Bubble plot of MSEA in TTvsNAT
+```{r}
+library(ggplot2)
+
+nat.data <- read.csv("./2022ProteomeMetabolism/02NAT_msea_ora_result.csv", header = T)
+
+plotdata <- nat.data[c(1:13),c(1,8,9)]
+
+p <- ggplot(plotdata,aes(x = LogP, 
+              y = EnrichmentRatio, 
+              size = EnrichmentRatio,
+              colour=LogP)) +
+     geom_point(shape = 16) +               
+     labs(x = "LogP", y = "EnrichmentRatio")+          
+     scale_colour_gradient2(name="-log10(P-value)",
+     low = "#ffbd39",
+     mid = "#e61c5d",
+     high = "#930077",
+     midpoint = 2)+
+     theme_bw()          
+
+
+tt.data <- read.csv("./2022ProteomeMetabolism/01TT_msea_ora_result.csv", header = T)
+
+plotdata <- tt.data[c(1:10),c(1,8,9)]
+
+```
+
+
+### Kruskal-Wallis test in NAT
+```{r}
+library(dplyr)
+
+prodata <- openxlsx::read.xlsx("./2022proteome/2022Proteome.xlsx", sheet = 1, rowNames = T)%>%as.data.frame()
+kw_data <- as.data.frame(t(prodata[,c(1:39)]))
+
+group <- openxlsx::read.xlsx("./2022proteome/Clinicaldata2.xlsx", sheet = 4, rowNames = T)%>%as.data.frame()
+
+kw_data <- cbind(group[6], kw_data)
+
+data1 <- kruskal.test(as.matrix(kw_data[2]) ~Segments, data = kw_data)
+
+pval=c()
+
+for (i in 2:ncol(kw_data)) {
+  p = kruskal.test(as.matrix(kw_data[i]) ~Segments, data = kw_data)$p.value
+  pval=c(pval,p)
+  
+}
+
+table_out <- as.data.frame(cbind(row.names(prodata),pval))
+
+write.csv(table_out, file = "NAT-KW-test_in_proteome.csv")
+
+```
+
+#### NAT KW-DEP heatmap
+```{r}
+library(ComplexHeatmap)
+library(tibble)
+prodata <- openxlsx::read.xlsx("./2022proteome/2022Proteome.xlsx", sheet = 1, rowNames = F)
+
+NAT_DEP_list <- openxlsx::read.xlsx("./2022proteome/NAT-KW-test_in_proteome.xlsx", sheet = 2, rowNames = F)
+
+NAT_DEP_exp <- merge(NAT_DEP_list[1], prodata[,1:40], by="Name")
+NAT_DEP_exp <- column_to_rownames(NAT_DEP_exp, var = "Name")
+
+plotdata <- as.data.frame(t(scale(t(log2(NAT_DEP_exp+1)))))
+
+groups <- openxlsx::read.xlsx("./2022proteome/Clinicaldata2.xlsx", sheet = 4)
+
+ht = HeatmapAnnotation(Segments = groups$Segments,
+                       show_legend = T,
+                       col = list(Segments = c("S1" = "#48466d",
+                                               "S2"   = "#3d84a8",
+                                               "S3"   = "#46cdcf",
+                                               "S4"   = "#abedd8",
+                                               "S5"   = "#f9ed69",
+                                               "S6"   = "#f08a5d",
+                                               "S7"   = "#b83b5e",
+                                               "S8"   = "#6a2c70")))
+
+col_fun = circlize::colorRamp2(c(-4, -2, 0, 2, 4),
+                               c("#2c83b7","deepskyblue1", "white",
+                                 "red", "#c2395a"))
+
+p <- Heatmap(plotdata, 
+             col = col_fun,
+             top_annotation = ht, 
+             show_row_names = F,
+             show_row_dend = F,
+             show_column_dend = T,
+             show_column_names = F,
+             cluster_columns = T,
+             clustering_method_columns = "ward.D",
+             clustering_method_rows = "ward.D",
+             cluster_rows = T,
+             row_names_gp = gpar(fontsize = 6),
+             heatmap_legend_param = list(title = "Zscore"))
+
+```
+
+#### NAT KW-DEP corrplot
+```{r}
+library(tibble)
+library(Hmisc)
+library(corrplot)
+prodata <- openxlsx::read.xlsx("./2022proteome/2022Proteome.xlsx", sheet = 1, rowNames = F)
+
+NAT_DEP_list <- openxlsx::read.xlsx("./2022proteome/NAT-KW-test_in_proteome.xlsx", sheet = 2, rowNames = F)
+
+NAT_DEP_exp <- merge(NAT_DEP_list[1], prodata[,1:40], by="Name")
+NAT_DEP_exp <- column_to_rownames(NAT_DEP_exp, var = "Name")
+
+res <- rcorr(as.matrix(log2(1+NAT_DEP_exp)))
+
+col1 <- colorRampPalette(c( "black","#00007f","blue","#007fff","cyan",
+  "#7fff7f","#fff5a5","#ffaa64","#ff8264","#ff6464","#930077")) 
+
+corrplot(res$r, order = "hclust",col=col1(300), col.lim=c(0.8,1),
+         hclust.method = "ward.D",method = "circle",diag=FALSE,
+         tl.col = "black", type = "upper", tl.pos = "lt")
+corrplot(res$r, add = T,order = "hclust",col=col1(300), col.lim=c(0.8,1),
+         hclust.method = "ward.D", number.digits = 2,number.cex = 0.3,
+         method = "number",type = "lower", tl.col = "black",diag=FALSE,
+         tl.pos = "n", cl.pos="n")   
+
+corrplot(res$r, order = "hclust",col=col1(300), col.lim=c(0.8,1),
+         hclust.method = "ward.D",method = "circle",
+         tl.col = "black", tl.pos = "lt", addrect = 2)
+
+library(factoextra)
+library(igraph)
+
+d <- dist(t(NAT_DEP_exp))
+
+fit <- hclust(d, method = "ward.D2")
+plot(fit, hang=-1, main="")
+
+fviz_dend(fit, k=2, rect = T, rect_fill = T,
+          rect_border = c("#00b8a9","#f6416c"))
+
+
+```
+
+### Corplot_NAT
+```{r}
+library(factoextra)
+library(igraph)
+prodata <- openxlsx::read.xlsx("./2022proteome/2022Proteome.xlsx", sheet = 1, rowNames = T)
+
+NAT_exp <- as.data.frame(log2(prodata[,1:39]+1))
+d <- dist(t(NAT_exp))
+
+fit <- hclust(d, method = "ward.D2")
+plot(fit, hang=-1, main="")
+
+fviz_dend(fit, k=2, rect = T, rect_fill = T,
+          rect_border = c("#00b8a9","#f6416c"))
+
+```
+
+####Corplot_QC for metabolome and lipidome
+```{r}
+library(Hmisc)
+library(corrplot)
+QC_data <- read.csv("./2022ProteomeMetabolism/QC for lipidome.csv", header = T, row.names = 1)
+
+plotdata <- as.data.frame(log2(QC_data+1))
+
+res <- rcorr(as.matrix(plotdata))
+
+corrplot(res$r, order = "hclust", 
+         hclust.method = "ward.D2",method = "circle",
+         tl.col = "black", type = "upper", tl.pos = "d")
+
+corrplot(res$r, add = T,order = "hclust", 
+         hclust.method = "ward.D2",
+         method = "number",type = "lower", tl.col = "black",diag=FALSE,
+         tl.pos = "n", cl.pos="n")              
+
+
+```
+
+#### Hierarchical_Clustering_NAT_DEP
+```{r}
+library(factoextra)
+library(igraph)
+
+d <- dist(t(plotdata))
+
+fit <- hclust(d, method = "complete")
+plot(fit, hang=-1, main="")
+
+fviz_dend(fit, k=2, rect = T, rect_fill = T,
+          rect_border = c("#00b8a9","#f6416c"))
+```
+
+### NAT_LDA
+```{r}
+library(MASS)
+library(ggplot2)
+library(MOVICS)
+prodata <- openxlsx::read.xlsx("./2022proteome/2022Proteome.xlsx", sheet = 1, rowNames = T)
+pt.elite <- getElites(dat=prodata[,1:39],
+                       method="mad",
+                       na.action="rm",
+                       elite.pct = 0.3)
+pt.data <- as.data.frame(scale(t(log2(pt.elite$elite.dat+1))))
+
+#pt.data <- as.data.frame(scale(t(log2(1+NAT_DEP_exp))))
+lda.data <- as.data.frame(t(na.omit(t(pt.data))))
+
+groups <- as.factor(c(rep("S1",3),rep("S2",5),rep("S3",5),
+                          rep("S4",5),rep("S5",5),rep("S6",5),
+                          rep("S7",5),rep("S8",6)))
+
+lda.pt = lda(lda.data, groups)
+
+result = predict(lda.pt, lda.data)
+
+table(groups, result$class)
+
+P = lda.pt$scaling 
+means = lda.pt$means %*% P
+
+total_means = as.vector(lda.pt$prior %*% means)
+n_samples = nrow(lda.data)
+
+x<-as.matrix(lda.data) %*% P - (rep(1, n_samples) %o% total_means)
+
+subtybes <- as.data.frame(c(rep("Subtybe1",13),rep("Subtybe2",26)))
+names(groups) <- "Groups"
+names(subtybes) <- "Subtybes"
+lda_data <- cbind(x, groups, subtybes)
+
+p <- ggplot(data = lda_data, aes(x = LD1, y = LD2)) +
+  geom_point(aes(color = groups, shape=groups), size = 2) +
+  scale_shape_manual(values = c(0:2,5,6,3,4,8))+
+  scale_color_manual(values = c("#48466d","#3d84a8","#46cdcf","#abedd8",
+                                "#f9ed69","#f08a5d","#b83b5e","#6a2c70")) + 
+  theme_bw() +
+  theme(legend.position = "",
+        panel.grid=element_blank(),
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 14)) +
+  labs(x =  paste('LD1'), y = paste('LD2'), color = '')
+
+g <- p + stat_ellipse(aes(fill = Subtybes), geom = 'polygon', level = 0.95, 
+                 alpha = 0.1, show.legend = FALSE) +
+    scale_fill_manual(values = c("#0f4392","#ff5151"))
+
+```
+
+### NAT_Lipds_OPLS
+```{r}
+library(MASS)
+library(ggplot2)
+library(ropls)
+lipid.data <- openxlsx::read.xlsx("./2022ProteomeMetabolism/Lipid2023.xlsx", sheet = 1, rowNames = T)
+
+nat.data <- as.data.frame(log2(lipid.data[,c(2:40)]+1))
+
+pls.data <- as.data.frame(t(nat.data))
+
+groups <- openxlsx::read.xlsx("./2022proteome/Clinicaldata2.xlsx", sheet = 4, rowNames = T)
+
+##PLS-DA
+pdf("NAT_Lipid.plsda.pdf")
+pt.plsda <- opls(as.matrix(pls.data), groups$Subtypes2)
+dev.off()
+
+plot(pt.plsda,
+     typeVc = "x-score",
+     parAsColFcVn = groups$Subtypes2,
+     parPaletteVc = c("#00b8a9","#f6416c"))
+
+## OPLS-DA
+
+pdf("NAT_Lipid.oplsda.pdf")
+lipid.oplsda <- opls(as.matrix(pls.data), groups$Subtypes2, predI = 1, orthoI = NA)
+dev.off()
+
+plot(lipid.oplsda,
+     typeVc = "x-score",
+     parAsColFcVn = groups$Subtypes2,
+     parPaletteVc = c("#00b8a9","#f6416c"))
+```
+
+### NAT_Metabolites_OPLS
+```{r}
+library(MASS)
+library(ggplot2)
+library(ropls)
+lipid.data <- openxlsx::read.xlsx("./2022ProteomeMetabolism/Metabolites2.xlsx", sheet = 2, rowNames = T)
+
+pt.data <- as.data.frame(log2(lipid.data[,c(1:39)]+1))
+
+pls.data <- as.data.frame(t(pt.data))
+
+groups <- openxlsx::read.xlsx("./2022proteome/Clinicaldata2.xlsx", sheet = 4, rowNames = T)
+
+## OPLS-DA
+
+pdf("NAT_Metabolites.oplsda2.pdf")
+lipid.oplsda <- opls(as.matrix(pls.data), groups$Subtypes2, predI = 1, orthoI = NA)
+dev.off()
+
+plot(lipid.oplsda,
+     typeVc = "x-score",
+     parAsColFcVn = groups$Subtypes2,
+     parPaletteVc = c("#00b8a9","#f6416c"))
+```
+
+#### ggplot2 
+```{r}
+library(ggplot2)
+library(ggsci)
+library(tidyverse)
+
+sample.score = lipid.oplsda@scoreMN %>%  
+  as.data.frame() %>%
+  mutate(group = groups$Subtypes2,
+         o1 = lipid.oplsda@orthoScoreMN[,1]) 
+head(sample.score)
+
+p <- ggplot(sample.score, aes(p1, o1, color = groups$Segments)) +
+  geom_hline(yintercept = 0, linetype = 'dashed', size = 0.5) + 
+  geom_vline(xintercept = 0, linetype = 'dashed', size = 0.5) +
+  geom_point(aes(color = groups$Segments, shape=groups$Segments), size = 2) +
+  scale_shape_manual(values = c(0:2,5,6,3,4,8))+
+  scale_color_manual(values = c("#48466d","#3d84a8","#46cdcf","#abedd8",
+                                "#f9ed69","#f08a5d","#b83b5e","#6a2c70")) + 
+  #geom_point(aes(-10,-10), color = 'white') +
+  labs(x = 'OPLS-DA:t1(7%)',y = 'OPLS-DA:to1') +
+  xlim(-30,30)+ylim(-80,60)+
+  theme_bw() +
+  theme(legend.position ="",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 10),
+        panel.background = element_blank(),
+        panel.grid = element_blank(),
+        axis.text = element_text(size = 12),
+        axis.title = element_text(size = 14))
+
+g <- ggplot(sample.score, aes(p1, o1, color = groups$Subtypes2)) +
+  geom_hline(yintercept = 0, linetype = 'dashed', size = 0.5) + 
+  geom_vline(xintercept = 0, linetype = 'dashed', size = 0.5) +
+  geom_point() +
+  labs(x = 'OPLS-DA:t1(7%)',y = 'OPLS-DA:to1') +
+  stat_ellipse(level = 0.95, linetype = 'solid', 
+               size = 1, show.legend = FALSE) +
+  scale_color_manual(values = c("#0f4392","#ff5151")) +
+  xlim(-30,30)+ylim(-80,60)+
+  theme_bw() +
+  theme(legend.position = c(0.11,0.93),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 10),
+        panel.background = element_blank(),
+        panel.grid = element_blank(),
+        axis.text = element_text(size = 12),
+        axis.title = element_text(size = 14))
+```
+
+##### I
+```{r}
+lipid.vip <- as.data.frame(getVipVn(lipid.oplsda))
+write.csv(lipid.vip, file = "NAT_Metabolites_DAL_VIP.csv", row.names = T)
+```
+
+
+### DEP in NAT Clusters
+```{r}
+library(dplyr)
+library(limma)
+prodata <- openxlsx::read.xlsx("./2022proteome/2022Proteome.xlsx", sheet = 1,rowNames = T)
+
+groups <- c(rep("Cluster1",13), rep("Cluster2",26))
+
+design<- model.matrix(~0+factor(groups))
+colnames(design)<- levels(factor(groups))
+##voom
+v <- voom(prodata[,1:39], design, plot=TRUE)
+
+fit <- lmFit(v, design)
+
+cont.matrix <- makeContrasts('Cluster1-Cluster2', levels = design) 
+fit2 <- contrasts.fit(fit, cont.matrix)
+fit2 <- eBayes(fit2)
+
+output <- topTable(fit2, coef = 1, number = Inf, adjust.method = 'BH')
+write.csv(output, file = "NAT_DEPs_limmavoom2.csv",row.names = T)
+
+```
+
+>Lipids
+
+```{r}
+library(dplyr)
+library(limma)
+lipid.data <- openxlsx::read.xlsx("./2022ProteomeMetabolism/Lipid2023.xlsx", sheet = 1,rowNames = T)%>% as.data.frame()
+nat.data <- as.data.frame(lipid.data[,c(2:40)]+1)
+
+groups <- c(rep("Cluster1",18), rep("Cluster2",21))
+
+design<- model.matrix(~0+factor(groups))
+colnames(design)<- levels(factor(groups))
+##voom
+v <- voom(nat.data, design, plot=TRUE)
+
+fit <- lmFit(v, design)
+
+cont.matrix <- makeContrasts('Cluster1-Cluster2', levels = design) 
+fit2 <- contrasts.fit(fit, cont.matrix)
+fit2 <- eBayes(fit2)
+
+output <- topTable(fit2, coef = 1, number = Inf, adjust.method = 'BH')
+write.csv(output, file = "NAT_DALs_limmavoom.csv",row.names = T)
+
+```
+
+>Metabolites
+
+```{r}
+metabolites.data <- openxlsx::read.xlsx("./2022ProteomeMetabolism/Metabolites2.xlsx", sheet = 2,rowNames = T)
+
+groups <- c(rep("Cluster1",18), rep("Cluster2",21))
+
+design<- model.matrix(~0+factor(groups))
+colnames(design)<- levels(factor(groups))
+##voom
+v <- voom(metabolites.data[,1:39], design, plot=TRUE)
+
+fit <- lmFit(v, design)
+
+cont.matrix <- makeContrasts('Cluster1-Cluster2', levels = design) 
+fit2 <- contrasts.fit(fit, cont.matrix)
+fit2 <- eBayes(fit2)
+
+output <- topTable(fit2, coef = 1, number = Inf, adjust.method = 'BH')
+write.csv(output, file = "NAT_DAMs_limmavoom3.csv",row.names = T)
+```
+
+### Heatmap_NAT_hCluster2
+```{r}
+library(tibble)
+library(dplyr)
+library(ComplexHeatmap)
+
+PT_list <- openxlsx::read.xlsx("./NAT_DEPs_limmavoom2.xlsx", sheet = 2, rowNames = F)
+PT_list <- as.data.frame(PT_list[,1])
+names(PT_list) <- "Name" 
+
+PT_list <- PT_list%>% distinct(Name, .keep_all = T)
+
+prodata <- openxlsx::read.xlsx("./2022proteome/2022Proteome.xlsx", sheet = 1, rowNames = F)
+## Read into KW test_expression matrix
+dep.data <- merge(PT_list, prodata[,1:40], by = "Name")
+dep.data <- column_to_rownames(dep.data, var = "Name")
+
+plotdata <- as.data.frame(t(scale(log2(0.5+t(dep.data)))))
+
+clinicaldata <- openxlsx::read.xlsx("./2022proteome/Clinicaldata2.xlsx", sheet = 4, rowNames = T)
+
+ht = HeatmapAnnotation(Segments = clinicaldata$Segments,
+                        show_legend = T,annotation_name_side = "left",
+                        col = list(Segments = c("S1" = "#48466d",
+                                               "S2"   = "#3d84a8",
+                                               "S3"   = "#46cdcf",
+                                               "S4"   = "#abedd8",
+                                               "S5"   = "#f9ed69",
+                                               "S6"   = "#f08a5d",
+                                               "S7"   = "#b83b5e",
+                                               "S8"   = "#6a2c70")))
+ht2 = HeatmapAnnotation(Clusters = clinicaldata$Subtypes2,
+                        show_legend = T,annotation_name_side = "left",
+                        col = list(Clusters = c("Cluster1" = "#0f4392",
+                                               "" = "#ff5151"))) 
+col_fun = circlize::colorRamp2(c(-4,-2, 0,2, 4),
+                               c("#49a09d","#00AFBB","white",
+                                 "#FC4E07", "#b20a2c"))
+set.seed(123)
+p <- Heatmap(plotdata, column_split=clinicaldata$Subtypes2,
+             col = col_fun,
+             top_annotation = c(ht2,ht),
+             show_row_names = F,
+             show_row_dend = F,
+             show_column_dend = F,
+             show_column_names = F,clustering_distance_columns = "euclidean",
+             cluster_columns = T, clustering_method_columns = "ward.D",
+             cluster_rows = T, 
+             row_names_gp = gpar(fontsize = 6),
+             heatmap_legend_param = list(title = "Zscores"))
+
+
+cls <- plyr::ldply (row_order(p), data.frame)
+names(cls) <- c("id", "rowid") 
+cls <- dplyr::arrange(cls, rowid)
+plotdata$cluster <- cls$id
+write.csv(plotdata, file = "Heatmap_PT_DEP_cluster.csv")
+
+```
+
+### Heatmap of DAMs and DALs in NAT
+```{r}
+library(tibble)
+library(dplyr)
+library(ComplexHeatmap)
+
+dam_list <- openxlsx::read.xlsx("./NAT_DAMs_limmavoom2.xlsx", sheet = 2, rowNames = F)
+dam_list <- as.data.frame(dam_list[,1])
+names(dam_list) <- "Name" 
+
+dam_list <- dam_list%>% distinct(Name, .keep_all = T)
+
+metabolites.data <- openxlsx::read.xlsx("./2022ProteomeMetabolism/Metabolites2.xlsx", sheet = 2, rowNames = F)
+## Read into KW test_expression matrix
+dep.data <- merge(dam_list, metabolites.data[,1:40], by = "Name")
+dep.data <- column_to_rownames(dep.data, var = "Name")
+
+plotdata <- as.data.frame(t(scale(log2(t(dep.data)))))
+
+clinicaldata <- openxlsx::read.xlsx("./2022proteome/Clinicaldata2.xlsx", sheet = 4, rowNames = T)
+
+ht = HeatmapAnnotation(Segments = clinicaldata$Segments,
+                        show_legend = T,annotation_name_side = "left",
+                        col = list(Segments = c("S1" = "#48466d",
+                                               "S2"   = "#3d84a8",
+                                               "S3"   = "#46cdcf",
+                                               "S4"   = "#abedd8",
+                                               "S5"   = "#f9ed69",
+                                               "S6"   = "#f08a5d",
+                                               "S7"   = "#b83b5e",
+                                               "S8"   = "#6a2c70")))
+ht2 = HeatmapAnnotation(Clusters = clinicaldata$Subtypes2,
+                        show_legend = T,annotation_name_side = "left",
+                        col = list(Clusters = c("Cluster1" = "#0f4392",
+                                               "Cluster2" = "#ff5151"))) 
+col_fun = circlize::colorRamp2(c(-4,-2, 0,2, 4),
+                               c("#49a09d","#00AFBB","white",
+                                 "#FC4E07", "#b20a2c"))
+set.seed(123)
+p <- Heatmap(plotdata, 
+             col = col_fun,
+             top_annotation = c(ht2,ht),
+             show_row_names = F,
+             show_row_dend = F,
+             show_column_dend = F,
+             show_column_names = F,
+             cluster_columns = F, 
+             cluster_rows = T, 
+             row_names_gp = gpar(fontsize = 6),
+             heatmap_legend_param = list(title = "Zscores"))
+```
+
+> lipids
+
+```{r}
+library(tibble)
+library(dplyr)
+library(ComplexHeatmap)
+
+dal_list <- openxlsx::read.xlsx("./LL-RL-NAT/NAT_DALs_limmavoom.xlsx", sheet = 2, rowNames = F)
+dal_list <- as.data.frame(dal_list[,1])
+names(dal_list) <- "Name" 
+
+dal_list <- dal_list%>% distinct(Name, .keep_all = T)
+
+lipids.data <- openxlsx::read.xlsx("./2022ProteomeMetabolism/Lipid2023.xlsx", sheet = 1, rowNames = F)
+## Read into KW test_expression matrix
+dep.data <- merge(dal_list, lipids.data[,c(1:41)], by = "Name")
+dep.data <- column_to_rownames(dep.data[,-2], var = "Name")
+
+plotdata <- as.data.frame(t(scale(log2(t(dep.data)))))
+
+clinicaldata <- openxlsx::read.xlsx("./2022proteome/Clinicaldata2.xlsx", sheet = 4, rowNames = T)
+
+ht = HeatmapAnnotation(Segments = clinicaldata$Segments,
+                        show_legend = T,annotation_name_side = "left",
+                        col = list(Segments = c("S1" = "#48466d",
+                                               "S2"   = "#3d84a8",
+                                               "S3"   = "#46cdcf",
+                                               "S4"   = "#abedd8",
+                                               "S5"   = "#f9ed69",
+                                               "S6"   = "#f08a5d",
+                                               "S7"   = "#b83b5e",
+                                               "S8"   = "#6a2c70")))
+ht2 = HeatmapAnnotation(Clusters = clinicaldata$Subtypes2,
+                        show_legend = T,annotation_name_side = "left",
+                        col = list(Clusters = c("Cluster1" = "#0f4392",
+                                               "Cluster2" = "#ff5151"))) 
+col_fun = circlize::colorRamp2(c(-4,-2, 0,2, 4),
+                               c("#49a09d","#00AFBB","white",
+                                 "#FC4E07", "#b20a2c"))
+set.seed(123)
+p <- Heatmap(plotdata, 
+             col = col_fun,
+             top_annotation = c(ht2,ht),
+             show_row_names = F,
+             show_row_dend = F,
+             show_column_dend = F,
+             show_column_names = F,clustering_distance_columns = "euclidean",
+             cluster_columns = F, clustering_method_columns = "ward.D",
+             cluster_rows = T, 
+             row_names_gp = gpar(fontsize = 6),
+             heatmap_legend_param = list(title = "Zscores"))
+```
+
+#### Bubble plot of MSEA in NAT-cluster
+```{r}
+library(ggplot2)
+
+ll.data <- read.csv("./2022ProteomeMetabolism/NAT-Cluster1-msea_ora_result.csv", header = T)
+
+plotdata <- ll.data[c(1:8),c(1,8,9)]
+
+p <- ggplot(plotdata,aes(x = EnrichmentRatio, 
+              y = reorder(Name,EnrichmentRatio,sum), 
+              size = EnrichmentRatio,
+              colour=LogP)) +
+     geom_point(shape = 16) +                
+     labs(x = "EnrichmentRatio", y = "")+          
+     scale_colour_gradient2(name="-log10(P-value)",
+     low = "#ffbd39",
+     mid = "#e61c5d",
+     high = "#930077",
+     midpoint = 3)+
+     theme_bw()          
+
+
+RL.data <- read.csv("./2022ProteomeMetabolism/NAT-cluster2-msea_ora_result.csv", header = T)
+
+plotdata <- RL.data[c(1:8),c(1,8,9)]
+
+```
+
+#### LineChart_NAT_DAL
+```{r}
+library(ggplot2)
+library(reshape2)
+library(tibble)
+library(dplyr)
+hex.data <- openxlsx::read.xlsx("./NAT/NAT_lipid_mean2023.xlsx", sheet = 9, rowNames = T)
+
+hex.data <- as.data.frame(t(scale(t(hex.data))))
+hex.data <- rownames_to_column(hex.data, var = "Name")
+
+plotdata <- melt(hex.data, by="Name")
+
+mean <- plotdata %>% 
+  group_by(variable) %>% 
+  summarise(value = mean(value))  
+mean$variable <- as.numeric(mean$variable)
+
+p <- ggplot(plotdata, aes(x=variable, y=value)) +
+     geom_line(aes(group=Name), color="#e84545", alpha=0.03, size=2)+
+     geom_line(data = mean, color="#e84545", alpha = 0.7, size=2) + 
+     geom_point(data = mean)+
+     xlab("")+ylab("Relative Abundance")+
+     theme_bw()
+
+```
+
+
+### NAT_annotation
+```{r}
+library(ggplot2)
+cluster1 <- openxlsx::read.xlsx("./NAT_hcluster_FINAL_GO.xlsx", sheet = 2)
+
+c1 <- ggplot(cluster1, aes(x = reorder(factor(Description), `-LogP`), 
+                           y = `-LogP`)) + 
+  geom_bar(stat = 'identity', fill = '#0f4392', width = 0.7)+
+  xlab("")+ylab("-log10(p-value)")+
+  coord_flip()+
+  theme_classic() +
+  theme(legend.position ="",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 10),
+        panel.background = element_blank(),
+        panel.grid = element_blank(),
+        axis.text = element_text(size = 12),
+        axis.title = element_text(size = 14))
+
+cluster2 <- openxlsx::read.xlsx("./NAT_hcluster_FINAL_GO.xlsx", sheet = 3)
+c2 <- ggplot(cluster2, aes(x = reorder(factor(Description), `-LogP`), 
+                           y = `-LogP`)) + 
+  geom_bar(stat = 'identity', fill = '#ff5151', width = 0.7)+
+  xlab("")+ylab("-log10(p-value)")+
+  coord_flip()+
+  theme_classic() +
+  theme(legend.position ="",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 10),
+        panel.background = element_blank(),
+        panel.grid = element_blank(),
+        axis.text = element_text(size = 12),
+        axis.title = element_text(size = 14))
+
+
+```
+
+##Multi-Omics
+#### T/N data LDA
+```{r}
+library(MASS)
+library(ggplot2)
+library(MOVICS)
+prodata <- openxlsx::read.xlsx("./2022proteome/2022Proteome.xlsx", sheet = 2, rowNames = T)
+pt.elite <- getElites(dat=prodata,
+                       method="mad",
+                       na.action="rm",
+                       elite.pct = 0.3)
+pt.data <- as.data.frame(scale(t(log2(pt.elite$elite.dat+1))))
+
+lda.data <- as.data.frame(t(na.omit(t(pt.data))))
+
+groups <- as.factor(c(rep("S1",3),rep("S2",5),rep("S3",5),
+                          rep("S4",5),rep("S5",5),rep("S6",5),
+                          rep("S7",5),rep("S8",6)))
+
+lda.pt = lda(lda.data, groups)
+
+result = predict(lda.pt, lda.data)
+
+table(groups, result$class)
+
+P = lda.pt$scaling 
+means = lda.pt$means %*% P
+
+total_means = as.vector(lda.pt$prior %*% means)
+n_samples = nrow(lda.data)
+
+x<-as.matrix(lda.data) %*% P - (rep(1, n_samples) %o% total_means)
+
+subtybes <- as.data.frame(c(rep("Subtybe1",18),rep("Subtybe2",21)))
+names(groups) <- "Groups"
+names(subtybes) <- "Subtybes"
+lda_data <- cbind(x, groups, subtybes)
+
+p <- ggplot(data = lda_data, aes(x = LD1, y = LD2)) +
+  geom_point(aes(color = groups, shape=groups), size = 2) +
+  scale_shape_manual(values = c(0:2,5,6,3,4,8))+
+  scale_color_manual(values = c("#48466d","#3d84a8","#46cdcf","#abedd8",
+                                "#f9ed69","#f08a5d","#b83b5e","#6a2c70")) + 
+  theme_bw() +
+  theme(legend.position = "",
+        panel.grid=element_blank(),
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 14)) +
+  labs(x =  paste('LD1'), y = paste('LD2'), color = '')
+
+g <- p + stat_ellipse(aes(fill = Subtybes), geom = 'polygon', level = 0.95, 
+                 alpha = 0.1, show.legend = FALSE) +
+    scale_fill_manual(values = c("#00b8a9","#f6416c"))
+
+```
+
+
+### proteome NMF cluster
+
+```{r}
+library(NMF)
+library(doMPI)
+library(dplyr)
+prodata <- openxlsx::read.xlsx("./2022proteome/2022Proteome.xlsx", sheet = 2, rowNames = T)%>%as.data.frame()
+
+prodata <- log2(1+prodata)
+
+mads <- apply(prodata,1,mad) 
+pro.exp <- prodata[rev(order(mads))[1:4000],] 
+
+res <- nmf(pro.exp,2:8,nrun=10,seed=123,method = "lee")
+plot(res)
+
+res <- nmf(pro.exp,3,nrun=10,seed=123)
+
+group <- predict(res)
+table(group)
+write.csv(as.data.frame(group), file = "Proteome_subtypes4000.csv")
+
+coefmap(res)
+consensusmap(res)
+
+index <- extractFeatures(res,0.95) 
+sig.order <- unlist(index)
+NMF.Exp <- prodata[sig.order,]
+NMF.Exp <- na.omit(NMF.Exp)
+
+library(tinyarray)
+dp = NMF.Exp[,order(group)]
+draw_heatmap(dp,sort(group), split_column = 3,
+             color_an = c("#2874C5","#EABF00","#C6524A","#868686"),
+             annotation_legend = T,
+             cluster_cols = F,
+             show_rownames = T)
+
+
+jco <- c("#2874C5","#EABF00","#C6524A")
+res2 <- nmf(NMF.Exp,3,nrun=10,seed=123)
+
+coefmap(res2)
+consensusmap(res2)
+group2 <- predict(res2)
+
+basismap(res, distfun="euclidean", hclustfun="ward",
+ cexCol = 1,
+ cexRow = 0.3,
+ annColors=list(c("1"=jco[1],"2"=jco[2],"3"=jco[3])))
+
+group <- predict(res) 
+table(group)
+consensusmap(res,
+             labRow = NA,
+             labCol = NA,
+             annCol = data.frame("cluster"=group[colnames(res)]),
+             annColors = list(cluster=c("1"=jco[1],"2"=jco[2],"3"=jco[3])))
+
+```
+
+#### lipid NMF cluster
+
+```{r}
+library(NMF)
+library(doMPI)
+library(dplyr)
+lipid.data <- openxlsx::read.xlsx("./2022ProteomeMetabolism/Metabolites2023.xlsx", sheet = 3, rowNames = T)%>%as.data.frame()
+
+lipid.data <- log2(1+lipid.data)
+mads <- apply(lipid.data,1,mad) 
+lipid.exp <- lipid.data[rev(order(mads))[1:500],] 
+
+res <- nmf(lipid.exp,2:8,nrun=10,seed=123,method = "lee")
+plot(res)
+
+res <- nmf(lipid.data,3,nrun=10,seed=123)
+
+group <- predict(res)
+table(group)
+write.csv(as.data.frame(group), file = "Proteome_subtypes4000.csv")
+
+coefmap(res)
+consensusmap(res)
+
+index <- extractFeatures(res,0.95) 
+sig.order <- unlist(index)
+NMF.Exp <- prodata[sig.order,]
+NMF.Exp <- na.omit(NMF.Exp) 
+
+library(tinyarray)
+dp = NMF.Exp[,order(group)]
+draw_heatmap(dp,sort(group), split_column = 3,
+             color_an = c("#2874C5","#EABF00","#C6524A","#868686"),
+             annotation_legend = T,
+             cluster_cols = F,
+             show_rownames = T)
+
+
+jco <- c("#2874C5","#EABF00","#C6524A")
+res2 <- nmf(NMF.Exp,3,nrun=10,seed=123)
+
+coefmap(res2)
+consensusmap(res2)
+group2 <- predict(res2)
+
+basismap(res, distfun="euclidean", hclustfun="ward",
+ cexCol = 1,
+ cexRow = 0.3,
+ annColors=list(c("1"=jco[1],"2"=jco[2],"3"=jco[3])))
+
+group <- predict(res) 
+table(group)
+consensusmap(res,
+             labRow = NA,
+             labCol = NA,
+             annCol = data.frame("cluster"=group[colnames(res)]),
+             annColors = list(cluster=c("1"=jco[1],"2"=jco[2],"3"=jco[3])))
+
+```
+
+
+#### proteome 3 clusters
+```{r}
+library(limma)
+prodata <- read.csv("./NMF_log2_mad3000.csv", header = T, row.names = 1)
+groups <- openxlsx::read.xlsx("./2022MBR/Clinicaldata.xlsx", sheet = 3, rowNames = TRUE)
+groups <- groups[1:39,]
+design<- model.matrix(~0+factor(groups$Subtypes3))
+colnames(design)<- levels(factor(groups$Subtypes3))
+
+fit <- lmFit(prodata, design)
+
+cont.matrix <- makeContrasts('C3-other', levels = design) 
+fit2 <- contrasts.fit(fit, cont.matrix)
+fit2 <- eBayes(fit2)
+
+output <- topTable(fit2, coef = 1, number = Inf, adjust.method = 'BH')
+write.csv(output, file = "NMF_C3_DEPs_mad.csv",row.names = T)
+```
+
+>Multiple analysis
+
+```{r}
+library(limma)
+library(dplyr)
+##Proteome
+prodata <- openxlsx::read.xlsx("./2022proteome/2022Proteome.xlsx", sheet = 2, rowNames = T)%>%as.data.frame()
+prodata <- as.data.frame(log2(1+prodata))
+
+groups <- openxlsx::read.xlsx("./2022MBR/Clinicaldata.xlsx", sheet = 3, rowNames = TRUE)
+groups <- groups[1:39,]
+design<- model.matrix(~0+factor(groups$Subtypes))
+colnames(design)<- levels(factor(groups$Subtypes))
+
+cont.wt <- makeContrasts("C1-C2", "C1-C3","C2-C3", "C2-C1",
+                         levels=design) 
+
+fit <- lmFit(prodata, design)
+fit2 <- contrasts.fit(fit, cont.wt) 
+fit2 <- eBayes(fit2) 
+tT=topTableF(fit2, adjust="BH",sort.by="F",n=Inf)
+
+write.csv(tT, file = "NMF_C1-2-3_DEPs.csv",row.names = T)
+
+##metabolome 
+metabo.data <- openxlsx::read.xlsx("./2022ProteomeMetabolism/Metabolites2023.xlsx", sheet = 5, rowNames = T)%>%as.data.frame()
+metabo.data <- as.data.frame(log2(1+metabo.data))
+
+groups <- openxlsx::read.xlsx("./2022proteome/Clinicaldata2.xlsx", sheet = 3, rowNames = TRUE)
+groups <- groups[1:39,]
+design<- model.matrix(~0+factor(groups$Subtypes))
+colnames(design)<- levels(factor(groups$Subtypes))
+
+cont.wt <- makeContrasts("C1-C2", "C1-C3","C2-C3", "C2-C1",
+                         levels=design) 
+
+fit <- lmFit(metabo.data, design)
+fit2 <- contrasts.fit(fit, cont.wt) 
+fit2 <- eBayes(fit2) 
+tT=topTableF(fit2, adjust="BH",sort.by="F",n=Inf)
+
+write.csv(tT, file = "NMF_C1-2-3_DAMs.csv",row.names = T)
+
+## lipidome
+lipid.data <- openxlsx::read.xlsx("./2022ProteomeMetabolism/Lipid2023.xlsx", sheet = 3, rowNames = T)%>%as.data.frame()
+lipid.data <- as.data.frame(log2(1+lipid.data))
+
+groups <- openxlsx::read.xlsx("./2022proteome/Clinicaldata2.xlsx", sheet = 3, rowNames = TRUE)
+design<- model.matrix(~0+factor(groups$Subtypes))
+colnames(design)<- levels(factor(groups$Subtypes))
+
+cont.wt <- makeContrasts("C1-C2", "C1-C3","C2-C3", "C2-C1",
+                         levels=design) 
+
+fit <- lmFit(lipid.data, design)
+fit2 <- contrasts.fit(fit, cont.wt) 
+fit2 <- eBayes(fit2) 
+tT=topTableF(fit2, adjust="BH",sort.by="F",n=Inf)
+
+write.csv(tT, file = "NMF_C1-2-3_DALs.csv",row.names = T)
+
+```
+
+#### NMF clusters anotations
+```{r}
+library(pheatmap)
+plotdata <- openxlsx::read.xlsx("./NMF3_FINAL_GO.xlsx", sheet=3, rowNames = T)
+p <- pheatmap(plotdata, cluster_cols = FALSE, cluster_rows = FALSE,
+              border_color = "black",
+              color = colorRampPalette(c("white","red","firebrick3"))(20))
+```
+
+#### NMF clusters heatmap
+```{r}
+library(tibble)
+library(dplyr)
+library(ComplexHeatmap)
+library(circlize)
+nmf_list <- openxlsx::read.xlsx("./NMF_C1-2-3_DEPs.xlsx", sheet = 2, rowNames = F)
+nmf_list <- as.data.frame(nmf_list[,1])
+names(nmf_list) <- "Name" 
+
+nmf_list <- nmf_list%>% distinct(Name, .keep_all = T)
+
+prodata <- openxlsx::read.xlsx("./2022proteome/2022Proteome.xlsx", sheet = 2, rowNames = F)%>%as.data.frame()
+
+dep.data <- merge(nmf_list, prodata, by = "Name", sort = FALSE)
+dep.data <- column_to_rownames(dep.data, var = "Name")
+
+plotdata <- as.data.frame(t(scale(log2(1+t(dep.data)))))
+
+clinicaldata <- openxlsx::read.xlsx("./2022MBR/Clinicaldata.xlsx", sheet = 2, rowNames = T)%>%as.data.frame()
+
+sub = HeatmapAnnotation(Subtypes = clinicaldata$Subtypes,
+                        show_legend = T,annotation_name_side = "left",
+            col = list(Subtypes = c("C1" = "#2874C5",
+                                    "C2" = "#EABF00",
+                                    "C3" = "#C6524A")))
+seg = HeatmapAnnotation(Segments = clinicaldata$Segments,
+                        show_legend = T,annotation_name_side = "left",
+             col = list(Segments  = c("S1" = "#48466d", "S2"   = "#3d84a8",
+                                     "S3" = "#46cdcf", "S4"   = "#abedd8",
+                                     "S5" = "#f9ed69", "S6"   = "#f08a5d",
+                                     "S7" = "#b83b5e", "S8"   = "#6a2c70")))
+
+col_lianxu1 <- colorRamp2(c(0, 3),  c("#b1cbfa", "#6643b5"))
+col_lianxu2 <- colorRamp2(c(0, 4),  c("#b1cbfa", "#6643b5"))
+col_lianxu3 <- colorRamp2(c(0, 40),  c("#b1cbfa", "#6643b5"))
+col_lianxu4 <- colorRamp2(c(15, 35),  c("#b1cbfa", "#6643b5"))
+ht = HeatmapAnnotation(Age      = clinicaldata$Age,
+                            Gender   = clinicaldata$Gender,
+                            Drinking = clinicaldata$Drinking,
+                            HBV      = clinicaldata$HBV,
+                            AFP      = clinicaldata$AFP_cut,
+                            Grade    = clinicaldata$Grade,
+                            TumorSize= clinicaldata$TumorDiameter,
+                            BMI      = clinicaldata$BMI,
+                            TBIL     = clinicaldata$TBIL,
+                            `ALB/GLB`= clinicaldata$`ALB/GLB`,
+                            `AST/ALT`= clinicaldata$`AST/ALT`,
+                            show_legend = T,annotation_name_side = "left",
+       col = list(Age = circlize::colorRamp2(breaks = c(min(clinicaldata$Age),                                                        median(clinicaldata$Age),
+                                                        max(clinicaldata$Age)), 
+                  colors = c("#b1cbfa", "#b1cbfa", "#6643b5")),
+                  Gender = c("M" = "#6643b5", "F" = "#b1cbfa"),
+                  Drinking=c("Yes"="#6643b5", "No"= "#b1cbfa"),
+                  HBV  = c("Positive"="#6643b5", "Negative"= "#b1cbfa"),
+                  AFP = c("≤10"="#dfe2fe","10-100"= "#b1cbfa",
+                              "100-1000"="#8e98f5",">1000"="#6643b5"),
+                  Grade = c("G1"="#dfe2fe","G1-G2"= "#b1cbfa", "G2"="#8e98f5",
+                            "G2-G3"="#7874f2", "G3"="#6643b5"),
+                  TumorSize=c(">5" = "#6643b5", "≤5" = "#b1cbfa"),
+                  `ALB/GLB`=col_lianxu1, `AST/ALT`=col_lianxu2,
+                  BMI=col_lianxu4, TBIL=col_lianxu3))
+
+col_fun = circlize::colorRamp2(c(-4,-2, 0, 2, 4),
+                               c("#49a09d","#00AFBB","white",
+                                 "#FC4E07", "#b20a2c"))
+set.seed(123)
+p <- Heatmap(plotdata, km=3,
+             col = col_fun, column_split = clinicaldata$Subtypes,
+             top_annotation = c(sub, seg ,ht),
+             show_row_names = F,
+             show_row_dend = F,
+             show_column_dend = F,
+             show_column_names = F,
+             cluster_columns = F, 
+             cluster_rows = F, 
+             row_names_gp = gpar(fontsize = 6),
+             heatmap_legend_param = list(title = "Zscores"))
+```
+
+#### Ribosome biogenesis
+```{r}
+library(dplyr)
+library(tibble)
+prodata <- openxlsx::read.xlsx("./2022proteome/2022Proteome.xlsx", sheet = 1, rowNames = F)%>%as.data.frame()
+rb.list <- openxlsx::read.xlsx("./NMF_Ribosome b_genes.xlsx", sheet = 6, rowNames = F, startRow = 5)
+rb.list <- as.data.frame(rb.list[,1])
+names(rb.list) <- "Name" 
+
+rb.list <- rb.list%>% distinct(Name, .keep_all = T)
+
+rb.data <- merge(rb.list, prodata, by="Name",sort = F)
+write.csv(rb.data, file = "Ribosome b_genes.csv", row.names = F)
+
+rb.data <- column_to_rownames(rb.data, var = "Name")
+rb.data <- as.data.frame(t(rb.data))
+
+clinicaldata <- openxlsx::read.xlsx("./2022MBR/Clinicaldata.xlsx", sheet = 3, rowNames = T)%>%as.data.frame()
+
+rb.aov <- cbind(clinicaldata$Subtypes, rb.data)
+names(rb.aov)[1] <- "Subtypes"
+rb.aov <- rb.aov[-c(1:39),]
+
+anova1 <- summary(aov(rb.aov[,2]~Subtypes, rb.aov))
+
+output <- as.data.frame(anova1[[1]])
+
+
+for (i in 2:ncol(rb.aov)) {
+  anova = summary(aov(rb.aov[,i]~Subtypes, rb.aov))
+  output1 <- as.data.frame(anova[[1]])
+  output <- rbind(output1,output)
+}
+
+write.csv(output, file="Annova.results.csv")
+
+```
+
+>heatmap
+
+```{r}
+library(dplyr)
+library(ComplexHeatmap)
+rb.mean <- openxlsx::read.xlsx("./NMF_Ribosome b_genes.xlsx", sheet = 7, rowNames = T)
+
+plotdata <- as.data.frame(scale(t(rb.mean)))
+
+col_fun = circlize::colorRamp2(c(-1.5,-0.5, 0, 0.5, 1.5),
+                               c("#49a09d","#00AFBB","white",
+                                 "#FC4E07", "#b20a2c"))
+
+cell_fun <- function(j, i, x, y, width, height, fill) {
+  grid.text(
+    round(plotdata[i, j], 1), 
+    x, y,
+    gp = gpar(
+      fontsize = 10
+    ))
+}
+
+set.seed(123)
+p <- Heatmap(plotdata,
+             rect_gp = gpar(col = "white", lwd = 2), 
+             col = col_fun, cell_fun = cell_fun,
+             show_row_names = T,
+             show_row_dend = F,
+             show_column_dend = F,
+             show_column_names = T,
+             cluster_columns = F, 
+             cluster_rows = F, 
+             row_names_gp = gpar(fontsize = 10),
+             heatmap_legend_param = list(title = "Zscores"))
+```
+
+#### Ribosome proteins
+```{r}
+library(dplyr)
+library(ComplexHeatmap)
+RP.data <- openxlsx::read.xlsx("./NMF_Ribosome b_genes.xlsx", sheet = 3, rowNames = T)%>%as.data.frame()
+
+plotdata <- as.data.frame(t(scale(log2(1+t(RP.data)))))
+
+clinicaldata <- openxlsx::read.xlsx("./2022MBR/Clinicaldata.xlsx", sheet = 3, rowNames = T)%>%as.data.frame()
+
+sub = HeatmapAnnotation(Subtypes = clinicaldata$Subtypes,
+                        show_legend = T,annotation_name_side = "left",
+            col = list(Subtypes = c("NAT"= "grey",
+                                    "C1" = "#2874C5",
+                                    "C2" = "#EABF00",
+                                    "C3" = "#C6524A")))
+seg = HeatmapAnnotation(Segments = clinicaldata$Segments,
+                        show_legend = T,annotation_name_side = "left",
+             col = list(Segments  = c("S1" = "#48466d", "S2"   = "#3d84a8",
+                                     "S3" = "#46cdcf", "S4"   = "#abedd8",
+                                     "S5" = "#f9ed69", "S6"   = "#f08a5d",
+                                     "S7" = "#b83b5e", "S8"   = "#6a2c70")))
+hlob = HeatmapAnnotation(Hepatic_lobes = clinicaldata$Hepatic_lobes,
+                        show_legend = T,annotation_name_side = "left",
+             col = list(Hepatic_lobes=c("Left"= "#0f4392","Right"= "#ff5151")))
+
+group = HeatmapAnnotation(Groups = clinicaldata$Groups,
+                        show_legend = T,annotation_name_side = "left",
+             col = list(Groups=c("NAT"= "#0f4392","TT"= "#ff5151")))
+
+mark_gene <- openxlsx::read.xlsx("./NMF_Ribosome b_genes.xlsx", sheet = 4)%>%
+as.data.frame()
+
+row_anno <-  rowAnnotation(link = anno_mark(at = which(rownames(plotdata) 
+                                                       %in% mark_gene$Name), 
+                                       labels = mark_gene$Name,
+                           labels_gp = gpar(fontsize = 7.5)))
+
+
+col_fun = circlize::colorRamp2(c(-4,-2, 0, 2, 4),
+                               c("#49a09d","#00AFBB","white",
+                                 "#FC4E07", "#b20a2c"))
+set.seed(111)
+p <- Heatmap(plotdata,
+             col = col_fun, column_split = clinicaldata$Subtypes,
+             top_annotation = c(sub,seg,hlob),
+             show_row_names = F,
+             show_row_dend = F,
+             show_column_dend = F,
+             show_column_names = F,
+             cluster_columns = T, 
+             cluster_rows = F, 
+             row_names_gp = gpar(fontsize = 7.5),
+             heatmap_legend_param = list(title = "Zscores"))
+p+row_anno
+```
+
+#### Ribosome biogenesis and ribosome proteins
+```{r}
+library(ggplot2)
+library(ggrepel)
+output <- openxlsx::read.xlsx("./Proteome_DEGs_limmavoom.xlsx", sheet = 3, rowNames = T)
+names(output) <- c('Groups','log2FC', 'AveExpr', 'Pvalue', 'BH-Pvalue')
+
+yanse <- ifelse(output$`BH-Pvalue`<0.01 & abs(output$log2FC)>= 1, ifelse(output$log2FC> 1,'red','grey'),'green')
+
+p <- ggplot(output, aes(output$log2FC, -log10(output$`BH-Pvalue`), col=Groups))+geom_point(size=1)
+
+g <- p+theme_bw()+ 
+  scale_color_manual(values = c('#a82ffc','#ef7e56'))+ 
+  labs(x="log2 (Fold Change)",y="-log10 (BH-Pvalue)") +
+  geom_hline(yintercept = -log10(0.05), lty=4,col="grey",lwd=0.6) +
+  geom_vline(xintercept = c(-1, 1), lty=4,col="grey",lwd=0.6) +
+  theme(legend.position = "none",
+        panel.grid=element_blank(),
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 14))
+##label
+label <- ifelse(-log10(output$`BH-Pvalue`) > 5 & abs(output$log2FC) >= 1, rownames(output),"")
+
+l <- g+geom_text_repel(data=output, aes(x = output$log2FC, 
+                                   y = -log10(output$`BH-Pvalue`), 
+                                   label = label),
+                  size = 3,box.padding = unit(0.2, "lines"),
+                  segment.color = "black", 
+                  show.legend = FALSE)
+```
+
+#### xCell for immune cells
+```{r}
+library(xCell)
+library(dplyr)
+library(ComplexHeatmap)
+exprMatrix <- openxlsx::read.xlsx("./2022proteome/2022Proteome.xlsx", sheet = 1, rowNames = T)%>%as.data.frame()
+
+xcell.data <- as.data.frame(xCellAnalysis(exprMatrix))
+
+plotdata <- as.data.frame(t(scale(log2(1+t(xcell.data)))))
+
+plotdata <- na.omit(plotdata)
+
+clinicaldata <- openxlsx::read.xlsx("./2022MBR/Clinicaldata.xlsx", sheet = 3, rowNames = T)%>%as.data.frame()
+
+sub = HeatmapAnnotation(Subtypes = clinicaldata$Subtypes,
+                        show_legend = T,annotation_name_side = "left",
+            col = list(Subtypes = c("NAT"= "grey",
+                                    "C1" = "#2874C5",
+                                    "C2" = "#EABF00",
+                                    "C3" = "#C6524A")))
+seg = HeatmapAnnotation(Segments = clinicaldata$Segments,
+                        show_legend = T,annotation_name_side = "left",
+             col = list(Segments  = c("S1" = "#48466d", "S2"   = "#3d84a8",
+                                     "S3" = "#46cdcf", "S4"   = "#abedd8",
+                                     "S5" = "#f9ed69", "S6"   = "#f08a5d",
+                                     "S7" = "#b83b5e", "S8"   = "#6a2c70")))
+hlob = HeatmapAnnotation(Hepatic_lobes = clinicaldata$Hepatic_lobes,
+                        show_legend = T,annotation_name_side = "left",
+             col = list(Hepatic_lobes=c("Left"= "#0f4392","Right"= "#ff5151")))
+
+group = HeatmapAnnotation(Groups = clinicaldata$Groups,
+                        show_legend = T,annotation_name_side = "left",
+             col = list(Groups=c("NAT"= "#0f4392","TT"= "#ff5151")))
+
+col_fun = circlize::colorRamp2(c(-4,-2, 0, 2, 4),
+                               c("#49a09d","#00AFBB","white",
+                                 "#FC4E07", "#b20a2c"))
+set.seed(111)
+p <- Heatmap(plotdata,
+             col = col_fun, column_split = clinicaldata$Subtypes,
+             top_annotation = c(sub,seg,hlob),
+             show_row_names = T,
+             show_row_dend = F,
+             show_column_dend = F,
+             show_column_names = F,
+             cluster_columns = T, 
+             cluster_rows = T, 
+             row_names_gp = gpar(fontsize = 7.5),
+             heatmap_legend_param = list(title = "Zscores"))
+```
+
+#### NMF-C3 lipid groups
+```{r}
+library(dplyr)
+library(ComplexHeatmap)
+lipid.group <- openxlsx::read.xlsx("./2022ProteomeMetabolism/Lipid_headgroup.xlsx", sheet = 5, rowNames = T)%>%as.data.frame()
+
+plotdata <- as.data.frame(t(scale(log2(1+lipid.group[,-1]))))
+
+clinicaldata <- openxlsx::read.xlsx("./2022MBR/Clinicaldata.xlsx", sheet = 3, rowNames = T)%>%as.data.frame()
+
+sub = HeatmapAnnotation(Subtypes = clinicaldata$Subtypes,
+                        show_legend = T,annotation_name_side = "left",
+            col = list(Subtypes = c("NAT"= "grey",
+                                    "C1" = "#2874C5",
+                                    "C2" = "#EABF00",
+                                    "C3" = "#C6524A")))
+
+col_fun = circlize::colorRamp2(c(-4,-2, 0, 2, 4),
+                               c("#49a09d","#00AFBB","white",
+                                 "#FC4E07", "#b20a2c"))
+set.seed(111)
+p <- Heatmap(plotdata,
+             col = col_fun, column_split = clinicaldata$Subtypes,
+             top_annotation = sub,
+             show_row_names = T,
+             show_row_dend = F,
+             show_column_dend = F,
+             show_column_names = F,
+             cluster_columns = F, 
+             cluster_rows = T, 
+             row_names_gp = gpar(fontsize = 7.5),
+             heatmap_legend_param = list(title = "Zscores"))
+```
+
+
+#### Neutrophil degranulation
+```{r}
+library(dplyr)
+prodata <- openxlsx::read.xlsx("./2022proteome/2022Proteome.xlsx", sheet = 2, rowNames = TRUE)%>%as.data.frame()
+
+clinicaldata <- openxlsx::read.xlsx("./2022MBR/Clinicaldata.xlsx", sheet = 2, rowNames = T)%>%as.data.frame()
+
+plotdata <- cbind(as.data.frame(t(prodata)),clinicaldata$Subtypes)
+
+Csubtype.mean <- group_by(plotdata, `clinicaldata$Subtypes`)%>%
+  summarise_each(funs(median))
+
+mean.data <- as.data.frame(t(Csubtype.mean))
+
+openxlsx::write.xlsx(mean.data, file = "./NMF_Csubtypes_median.xlsx", rowNames=T)
+```
+
+>heatmap
+
+```{r}
+library(ComplexHeatmap)
+ne.data <- openxlsx::read.xlsx("./NMF_C1-2-3_DEPs.xlsx", sheet = 3, rowNames = T)
+plotdata <- as.data.frame(ne.data[,12:14])
+  
+
+col_fun = circlize::colorRamp2(c(-10, -5, -2, 0, 5, 10, 15, 20),
+                               c("#6643b5", "#1565c0","#009fff", "#fffde4",
+                                 "#fbd786", "#f7797d",
+                                 "#ec2f4b", "#8a2387"))
+
+cell_fun <- function(j, i, x, y, width, height, fill) {
+  grid.text(
+    round(plotdata[i, j], 1), 
+    x, y,
+    gp = gpar(
+      fontsize = 10
+    ))
+}
+
+set.seed(123)
+p <- Heatmap(plotdata,  
+             rect_gp = gpar(col = "white", lwd = 2, width=12), 
+             col = col_fun, cell_fun = cell_fun,
+             show_row_names = T,
+             show_row_dend = F,
+             show_column_dend = F,
+             show_column_names = T,
+             cluster_columns = F, 
+             cluster_rows = F, 
+             row_names_gp = gpar(fontsize = 6),
+             heatmap_legend_param = list(title = "log2(T/N)"))
+```
+
+>heatmap2
+
+```{r}
+library(dplyr)
+library(tibble)
+library(circlize)
+library(ComplexHeatmap)
+ne.list <- openxlsx::read.xlsx("./2022proteome/Neutrophil granule proteins.xlsx", sheet = 2, rowNames = F)%>%as.data.frame()
+
+ne.list <- as.data.frame(ne.list[,1])
+names(ne.list) <- "Name" 
+
+ne.list <- ne.list%>% distinct(Name, .keep_all = T)
+
+prodata <- openxlsx::read.xlsx("./2022proteome/2022Proteome.xlsx", sheet = 1, rowNames = F)%>%as.data.frame()
+
+ne.data <- merge(ne.list, prodata, by="Name",sort = F)
+ne.data <- column_to_rownames(ne.data, var = "Name")
+
+plotdata <- as.data.frame(t(scale(log2(1+t(ne.data)))))
+
+clinicaldata <- openxlsx::read.xlsx("./2022MBR/Clinicaldata.xlsx", sheet = 3, rowNames = T)%>%as.data.frame()
+
+col_lianxu1 <- colorRamp2(c(0, 0.05,0.1),  c("#f2fcfe","#6dd5fa","#2980b9"))
+col_lianxu2 <- colorRamp2(c(0, 0.1,0.2),  c("#fffcdc","#ffaf7b", "#d76d77"))
+
+ht = HeatmapAnnotation(Neutrophils    = clinicaldata$Neutrophils,
+                       ImmuneScores   = clinicaldata$ImmuneScore,
+                         show_legend  = T, annotation_name_side = "left",
+       col = list(Neutrophils=col_lianxu1, ImmuneScores=col_lianxu2))
+
+sub = HeatmapAnnotation(Subtypes = clinicaldata$Subtypes,
+                        show_legend = T,annotation_name_side = "left",
+            col = list(Subtypes = c("NAT"= "grey",
+                                    "C1" = "#2874C5",
+                                    "C2" = "#EABF00",
+                                    "C3" = "#C6524A")))
+seg = HeatmapAnnotation(Segments = clinicaldata$Segments,
+                        show_legend = T,annotation_name_side = "left",
+             col = list(Segments  = c("S1" = "#48466d", "S2"   = "#3d84a8",
+                                     "S3" = "#46cdcf", "S4"   = "#abedd8",
+                                     "S5" = "#f9ed69", "S6"   = "#f08a5d",
+                                     "S7" = "#b83b5e", "S8"   = "#6a2c70")))
+hlob = HeatmapAnnotation(Hepatic_lobes = clinicaldata$Hepatic_lobes,
+                        show_legend = T,annotation_name_side = "left",
+             col = list(Hepatic_lobes=c("Left"= "#0f4392","Right"= "#ff5151")))
+
+col_fun = circlize::colorRamp2(c(-4,-2, 0, 2, 4),
+                               c("#49a09d","#00AFBB","white",
+                                 "#FC4E07", "#b20a2c"))
+set.seed(111)
+p <- Heatmap(plotdata,
+             column_dend_reorder = order(clinicaldata$ImmuneScore, decreasing = TRUE),
+             col = col_fun,column_split = clinicaldata$Subtypes,
+             top_annotation = c(ht,sub,seg,hlob),
+             show_row_names = T,
+             show_row_dend = F,
+             show_column_dend = F,
+             show_column_names = F,
+             cluster_columns = T, 
+             cluster_rows = T, 
+             row_names_gp = gpar(fontsize = 7.5),
+             heatmap_legend_param = list(title = "Zscores"))
+
+```
+
+##### NMF clusters heatmap in Metabolome and lipidome
+```{r}
+library(tibble)
+library(dplyr)
+library(ComplexHeatmap)
+library(circlize)
+
+nmf_list <- openxlsx::read.xlsx("./2022ProteomeMetabolism/NMF_C1-2-3_DALs.xlsx", sheet = 2, rowNames = F)
+nmf_list <- as.data.frame(nmf_list[,1])
+names(nmf_list) <- "Name" 
+
+nmf_list <- nmf_list%>% distinct(Name, .keep_all = T)
+
+prodata <- openxlsx::read.xlsx("./2022ProteomeMetabolism/Lipid2023.xlsx", sheet = 3, rowNames = F)%>%as.data.frame()
+
+dep.data <- merge(nmf_list, prodata, by = "Name", sort = FALSE)
+dep.data <- column_to_rownames(dep.data, var = "Name")
+
+plotdata <- as.data.frame(t(scale(log2(1+t(dep.data)))))
+
+clinicaldata <- openxlsx::read.xlsx("./2022MBR/Clinicaldata.xlsx", sheet = 2, rowNames = T)%>%as.data.frame()
+
+sub = HeatmapAnnotation(Subtypes = clinicaldata$Subtypes,
+                        show_legend = T,annotation_name_side = "left",
+            col = list(Subtypes = c("C1" = "#2874C5",
+                                    "C2" = "#EABF00",
+                                    "C3" = "#C6524A")))
+
+col_fun = circlize::colorRamp2(c(-4,-2, 0, 2, 4),
+                               c("#49a09d","#00AFBB","white",
+                                 "#FC4E07", "#b20a2c"))
+set.seed(123)
+p <- Heatmap(plotdata, 
+             col = col_fun, column_split = clinicaldata$Subtypes,
+             top_annotation = sub,
+             show_row_names = F,
+             show_row_dend = F,
+             show_column_dend = F,
+             show_column_names = F,
+             cluster_columns = F, 
+             cluster_rows = F, 
+             row_names_gp = gpar(fontsize = 6),
+             heatmap_legend_param = list(title = "Zscores"))
+```
+
+####  Neutrophil degranulation corrplot
+```{r}
+library(dplyr)
+library(ggplot2)
+library(ggpubr)
+data <- openxlsx::read.xlsx("./NMF_C3_neu-pufa.xlsx", sheet = 1, rowNames = T)%>%as.data.frame()
+
+plotdata <- as.data.frame(scale(log2(data)))
+
+p <- ggplot(plotdata, aes(y=ALOX5, x=MMP9)) +
+  geom_point(color="black") + stat_smooth(method="lm")+
+  stat_cor(data=plotdata, method = "pearson")
+
+m <- ggplot(plotdata, aes(y=ALOX5, x=MPO)) +
+  geom_point(color="black") + stat_smooth(method="lm")+
+  stat_cor(data=plotdata, method = "pearson")
+
+i <- ggplot(plotdata, aes(y=ALOX5, x=ITGAM)) +
+  geom_point(color="black") + stat_smooth(method="lm")+
+  stat_cor(data=plotdata, method = "pearson")
+
+g <- ggarrange(ggarrange(p, m, i,
+                   labels = c("", "", ""),
+                   ncol = 3, nrow = 1))
+
+aa <- ggplot(plotdata, aes(y=ALOX5, x=Arachidonic.acid)) +
+  geom_point(color="black") + stat_smooth(method="lm")+
+  stat_cor(data=plotdata, method = "pearson")
+
+la <- ggplot(plotdata, aes(y=ALOX5, x=Linoleic.acid)) +
+  geom_point(color="black") + stat_smooth(method="lm")+
+  stat_cor(data=plotdata, method = "pearson")
+```
+
+#### PUFA metabolism
+```{r}
+library(dplyr)
+library(tibble)
+library(circlize)
+library(ComplexHeatmap)
+pufa.data <- openxlsx::read.xlsx("./2022ProteomeMetabolism/Metabolome_PUFA.xlsx", sheet = 1, rowNames = T)%>%as.data.frame()
+
+pufa.data <- as.data.frame(t(pufa.data[,-c(1,13:19)]))
+
+plotdata <- as.data.frame(t(scale(log2(1+t(pufa.data)))))
+
+clinicaldata <- openxlsx::read.xlsx("./2022MBR/Clinicaldata.xlsx", sheet = 3, rowNames = T)%>%as.data.frame()
+
+sub = HeatmapAnnotation(Subtypes = clinicaldata$Subtypes,
+                        show_legend = T,annotation_name_side = "left",
+            col = list(Subtypes = c("NAT"= "grey",
+                                    "C1" = "#2874C5",
+                                    "C2" = "#EABF00",
+                                    "C3" = "#C6524A")))
+
+col_fun = circlize::colorRamp2(c(-4,-2, 0, 2, 4),
+                               c("#49a09d","#00AFBB","white",
+                                 "#FC4E07", "#b20a2c"))
+set.seed(111)
+p <- Heatmap(plotdata,
+             col = col_fun,column_split = clinicaldata$Subtypes,
+             top_annotation = sub,
+             show_row_names = T,
+             show_row_dend = F,
+             show_column_dend = F,
+             show_column_names = F,
+             cluster_columns = F, 
+             cluster_rows = F, 
+             row_names_gp = gpar(fontsize = 7.5),
+             heatmap_legend_param = list(title = "Zscores"))
+
+```
+
+#### Left and Right lobes
+```{r}
+library(dplyr)
+library(tibble)
+library(circlize)
+library(ComplexHeatmap)
+pro.list <- openxlsx::read.xlsx("./2022proteome/Proteome_hubgene_RP and RBs", sheet = 1, rowNames = F)%>%as.data.frame()
+
+prodata <- openxlsx::read.xlsx("./2022proteome/2022Proteome.xlsx", sheet = 1, rowNames = F)%>%as.data.frame()
+
+data <- merge(pro.list, prodata, by="Name",sort = F)
+data <- column_to_rownames(data, var = "Name")
+
+plotdata <- as.data.frame(t(scale(log2(1+t(data)))))
+
+clinicaldata <- openxlsx::read.xlsx("./2022proteome/Clinicaldata2.xlsx", sheet = 2, rowNames = T)%>%as.data.frame()
+
+col_lianxu <- colorRamp2(c(0, 10,40),  c("#f2fcfe","#6dd5fa","#2980b9"))
+
+ht = HeatmapAnnotation(TBIL    = clinicaldata$TBIL,
+                       show_legend  = T, annotation_name_side = "left",
+                       col = list(TBIL=col_lianxu))
+
+sub = HeatmapAnnotation(Subtypes = clinicaldata$Subtypes,
+                        show_legend = T,annotation_name_side = "left",
+            col = list(Subtypes = c("NAT"= "grey",
+                                    "C1" = "#2874C5",
+                                    "C2" = "#EABF00",
+                                    "C3" = "#C6524A")))
+seg = HeatmapAnnotation(Segments = clinicaldata$Segments,
+                        show_legend = T,annotation_name_side = "left",
+             col = list(Segments  = c("S1" = "#48466d", "S2"   = "#3d84a8",
+                                     "S3" = "#46cdcf", "S4"   = "#abedd8",
+                                     "S5" = "#f9ed69", "S6"   = "#f08a5d",
+                                     "S7" = "#b83b5e", "S8"   = "#6a2c70")))
+hlob = HeatmapAnnotation(Hepatic_lobes = clinicaldata$Hepatic_lobes,
+                        show_legend = T,annotation_name_side = "left",
+             col = list(Hepatic_lobes=c("NAT"= "grey",
+                                        "Left_lobe"= "#0f4392",
+                                        "Right_lobe"= "#ff5151")))
+
+col_fun = circlize::colorRamp2(c(-4,-2, 0, 2, 4),
+                               c("#49a09d","#00AFBB","white",
+                                 "#FC4E07", "#b20a2c"))
+set.seed(111)
+p <- Heatmap(plotdata,
+             #column_dend_reorder = order(clinicaldata$TBIL, decreasing = TRUE),
+             col = col_fun,column_split = clinicaldata$Hepatic_lobes,
+             top_annotation = c(hlob,ht,sub,seg),
+             show_row_names = T,
+             show_row_dend = F,
+             show_column_dend = F,
+             show_column_names = F,
+             cluster_columns = T, 
+             cluster_rows = F, 
+             row_names_gp = gpar(fontsize = 7.5),
+             heatmap_legend_param = list(title = "Zscores"))
+
+```
+
+#### Clinical information
+```{r}
+library(ggplot2)
+library(ggpubr)
+clinicaldata <- openxlsx::read.xlsx("./2022MBR/Clinicaldata.xlsx",sheet = 2, rowNames = T)
+##秩和检验
+clinicaldata$`ALB/GLB` <- factor(clinicaldata$Subtypes)
+
+kruskal.test(`AST/ALT` ~ Subtypes, data = clinicaldata)
+aov1 <- aov(BMI ~ Subtypes, data = clinicaldata)
+
+my_comparisons <- list( c("C1", "C2"),c("C1", "C3"),
+                        c("C2", "C3"))
+p <- ggplot(clinicaldata, aes(x=Subtype, y=clinicaldata$`AST/ALT`, fill=Subtype))+
+  geom_violin(alpha=0.5)+
+  geom_boxplot(width=0.1,position = position_dodge(0.9))+
+  stat_compare_means(comparisons = my_comparisons,
+                     method = "t.test")+
+  theme_classic()+ 
+  theme(legend.position = "")+
+  #ggtitle("BMI in Subtypes") + 
+  #theme(plot.title = element_text(hjust = 0.5, size = 10))+
+  xlab("") + ylab("AST/ALT")
+```
+
+### Metabolome&Lipidome NMF cluster
+```{r}
+library(NMF)
+library(doMPI)
+library(dplyr)
+Lipid_data <- openxlsx::read.xlsx("./2022ProteomeMetabolism/Lipid2023.xlsx", sheet = 3, rowNames = T)%>%as.data.frame()
+
+Lipid_data <- log2(1+Lipid_data)
+
+## Metabolome
+metabo.data <- openxlsx::read.xlsx("./2022ProteomeMetabolism/Metabolites2.xlsx",sheet = 3, rowNames = T)%>%as.data.frame()
+
+metabo.data <- log2(1+metabo.data)
+
+res <- nmf(Lipid_data,2:8,nrun=10,seed=123)
+plot(res)
+## rank=3
+
+res <- nmf(Lipid_data,3,nrun=10,seed=123)
+
+group <- predict(res)
+table(group)
+write.csv(as.data.frame(group), file = "NMF-lipid_subtypes3.csv")
+
+coefmap(res)
+consensusmap(res)
+
+index <- extractFeatures(res,0.95) 
+sig.order <- unlist(index)
+NMF.Exp <- Lipid_data[sig.order,]
+NMF.Exp <- na.omit(NMF.Exp) 
+
+library(tinyarray)
+dp = NMF.Exp[,order(group)]
+draw_heatmap(dp,sort(group), split_column = 3,
+             color_an = c("#2874C5","#EABF00","#C6524A","#868686"),
+             annotation_legend = T,
+             cluster_cols = F,
+             show_rownames = T)
+
+
+jco <- c("#2874C5","#EABF00","#C6524A")
+res2 <- nmf(NMF.Exp,3,nrun=10,seed=123)
+
+coefmap(res2)
+consensusmap(res2)
+group2 <- predict(res2)
+
+basismap(res, distfun="euclidean", hclustfun="ward",
+ cexCol = 1,
+ cexRow = 0.3,
+ annColors=list(c("1"=jco[1],"2"=jco[2],"3"=jco[3])))
+
+group <- predict(res) 
+table(group)
+consensusmap(res,
+             labRow = NA,
+             labCol = NA,
+             annCol = data.frame("cluster"=group[colnames(res)]),
+             annColors = list(cluster=c("1"=jco[1],"2"=jco[2],"3"=jco[3])))
+
+```
+
+#### Lipid and Metabolites
+```{r}
+library(tibble)
+library(dplyr)
+library(ComplexHeatmap)
+library(circlize)
+nmf_list <- openxlsx::read.xlsx("./NMF_C1-2-3_DALs.xlsx", sheet = 2, rowNames = F)
+nmf_list <- as.data.frame(nmf_list[,1])
+names(nmf_list) <- "Name" 
+
+nmf_list <- nmf_list%>% distinct(Name, .keep_all = T)
+
+metabo.data <- openxlsx::read.xlsx("./2022ProteomeMetabolism/Metabolites2.xlsx", sheet = 4, rowNames = F)%>%as.data.frame()
+
+dep.data <- merge(nmf_list, metabo.data, by = "Name", sort = FALSE)
+dep.data <- column_to_rownames(dep.data, var = "Name")
+
+plotdata <- as.data.frame(t(scale(log2(t(dep.data)))))
+
+clinicaldata <- openxlsx::read.xlsx("./2022MBR/Clinicaldata.xlsx", sheet = 3, rowNames = T)%>%as.data.frame()
+
+clinicaldata <- as.data.frame(clinicaldata[1:39,])
+
+pc = HeatmapAnnotation(Subtypes = clinicaldata$Subtypes,
+                        show_legend = T,annotation_name_side = "left",
+            col = list(Subtypes = c("C1" = "#2874C5",
+                                    "C2" = "#EABF00",
+                                    "C3" = "#C6524A")))
+lc = HeatmapAnnotation(LC.subtypes=clinicaldata$LC_subtypes,
+                        show_legend = T,annotation_name_side = "left",
+            col = list(LC.subtypes=c("LC1" = "#EABF00",
+                                    "LC2" = "#2874C5",
+                                    "LC3" = "#C6524A")))
+mc = HeatmapAnnotation(MC.subtypes=clinicaldata$MC_subtypes,
+                        show_legend = T,annotation_name_side = "left",
+            col = list(MC.subtypes=c("MC1" = "#2874C5",
+                                    "MC2" = "#C6524A",
+                                    "MC3" = "#EABF00")))
+
+
+col_fun = circlize::colorRamp2(c(-4,-2, 0,2, 4),
+                               c("#49a09d","#00AFBB","white",
+                                 "#FC4E07", "#b20a2c"))
+set.seed(111)
+p <- Heatmap(plotdata,
+             col = col_fun, column_split = clinicaldata$Subtypes,
+             top_annotation = c(pc,lc,mc),
+             show_row_names = F,
+             show_row_dend = F,
+             show_column_dend = F,
+             show_column_names = F,
+             cluster_columns = F, 
+             cluster_rows = F, 
+             row_names_gp = gpar(fontsize = 6),
+             heatmap_legend_param = list(title = "Relative Abundance"))
+
+
+kruskal.test(PC_subtypes ~ Subtypes, data = clinicaldata)
+
+kruskal.test(MC_subtypes ~ Subtypes, data = clinicaldata)
+
+```
+
+#### Metaboanalysis anotation
+```{r}
+library(ggplot2)
+library(dplyr)
+plotdata <- read.csv("./2022ProteomeMetabolism/NMF_C3_pathway_results.csv", header = T)
+plotdata <- plotdata[1:6,]
+
+p <- ggplot(plotdata, aes(y = reorder(factor(Name),logP),x=logP)) + 
+     geom_bar(stat = 'identity', position = 'dodge', fill = "#C6524A") +
+     theme_classic()+scale_x_reverse()+
+     scale_y_discrete(position = "right")+
+     xlab("-log10 (p-value)")+ylab("")
+
+```
+
+##CPTAC data
+
+#### NMF subtypes in CPTAC
+```{r}
+library(dplyr)
+library(tibble)
+nmf.list <- read.csv("./NMF_log2_mad4000.csv", header = T)
+nmf.list <- as.data.frame(nmf.list[,1])
+names(nmf.list) <- "Symbol" 
+
+nmf.list <- nmf.list%>% distinct(Symbol, .keep_all = T)
+
+cptac.data <- openxlsx::read.xlsx("./Download data/hcc_prodata_tvsn.xlsx", sheet = 1, rowNames = F)
+
+nmf.data <- merge(nmf.list, cptac.data, by="Symbol")
+nmf.data <- column_to_rownames(nmf.data, var = "Symbol")
+
+```
+
+>NMF cluster
+
+```{r}
+library(NMF)
+library(doMPI)
+library(dplyr)
+
+pro.exp <- log2(1+nmf.data)
+
+res <- nmf(pro.exp,2:8,nrun=10,seed=123)
+plot(res)
+## rank=3
+
+res <- nmf(pro.exp,3,nrun=10,seed=123)
+
+group <- predict(res)
+table(group)
+write.csv(as.data.frame(group), file = "CPTAC_subtypes3.csv")
+
+coefmap(res)
+consensusmap(res)
+
+jco <- c("#2874C5","#EABF00","#C6524A")
+
+basismap(res, distfun="euclidean", hclustfun="ward",
+ cexCol = 1,
+ cexRow = 0.3,
+ annColors=list(c("1"=jco[1],"2"=jco[2],"3"=jco[3])))
+
+consensusmap(res,
+             labRow = NA,
+             labCol = NA,
+             annCol = data.frame("cluster"=group[colnames(res)]),
+             annColors = list(cluster=c("1"=jco[1],"2"=jco[2],"3"=jco[3])))
+
+```
+
+####CPTAC Ribosome-genes
+```{r}
+library(survminer)
+library(survival)
+library(dplyr)
+library(tibble)
+rb.list <- openxlsx::read.xlsx("./NMF_Ribosome b_genes2.xlsx", sheet = 2,rowNames = F)%>%as.data.frame()
+rb.list <- as.data.frame(rb.list[,1])
+names(rb.list) <- "Symbol" 
+
+rb.list <- rb.list%>% distinct(Symbol, .keep_all = T)
+
+cptac.data <- openxlsx::read.xlsx("./Download data/hcc_proteome_TTexp.xlsx", sheet = 1, rowNames = F)
+
+rb.data <- merge(rb.list, cptac.data, by="Symbol")
+rb.data <- as.data.frame(t(column_to_rownames(rb.data, var = "Symbol")))
+rb.data <- rownames_to_column(rb.data, var = "TumorID")
+
+CPTAC.clinical <- openxlsx::read.xlsx("./Download data/Zhou_Liver_Cancer_ProtemoeMeta.xlsx", sheet = 2, rowNames = F)
+
+surv.data <- merge(CPTAC.clinical[,c(1,24:27)], rb.data, by="TumorID")
+
+cutoff <- surv_cutpoint(surv.data, time = 'Survival_time', 
+                        event = 'Survival_test', 
+                        variables = c("XPO1","RPRD1B","RAN","CSNK2A1"))
+
+summary(cutoff)
+
+ncut <- cut(surv.data$XPO1, breaks = c(0, 1.798, Inf), 
+            labels = c('Low', 'High'))
+scut <- cut(surv.data$RPRD1B, breaks = c(0, 1.372, Inf), 
+            labels = c('Low', 'High'))
+pcut <- cut(surv.data$RAN, breaks = c(0, 2.185, Inf), 
+            labels = c('Low', 'High'))
+ccut <- cut(surv.data$CSNK2A1, breaks = c(0, 1.68, Inf), 
+            labels = c('Low', 'High'))
+
+fit <- survfit(Surv(Survival_time, Survival_test)~scut, data = surv.data)
+
+p <- ggsurvplot(fit, pval=TRUE, surv.median.line = "hv", 
+           palette=c("blue", "red"),
+           legend.title="RPRD1B", legend.lab=c('Low','High'),
+           legend=c(0.85,0.15),
+           ggtheme = theme_bw(),
+           title="Overall Survival in CPTAC")
+p
+
+```
+
+####CPTAC ND-genes
+```{r}
+library(survminer)
+library(survival)
+library(dplyr)
+library(tibble)
+ne.list <- openxlsx::read.xlsx("./NMF_C1-2-3_DEPs.xlsx", sheet = 3,rowNames = F)
+ne.list <- as.data.frame(ne.list[,1])
+names(ne.list) <- "Symbol" 
+
+ne.list <- ne.list%>% distinct(Symbol, .keep_all = T)
+
+cptac.data <- openxlsx::read.xlsx("./Download data/hcc_proteome_TTexp.xlsx", sheet = 1, rowNames = F)
+
+ne.data <- merge(ne.list, cptac.data, by="Symbol")
+ne.data <- as.data.frame(t(column_to_rownames(ne.data, var = "Symbol")))
+ne.data <- rownames_to_column(ne.data, var = "TumorID")
+
+CPTAC.clinical <- openxlsx::read.xlsx("./Download data/Zhou_Liver_Cancer_ProtemoeMeta.xlsx", sheet = 2, rowNames = F)
+
+surv.data <- merge(CPTAC.clinical[,c(1,24:27)], ne.data, by="TumorID")
+
+cutoff <- surv_cutpoint(surv.data, time = 'Survival_time', 
+                        event = 'Survival_test', 
+                        variables = c("ICAM1","CEACAM8","ITGAM","S100A8",
+                                      "ITGB2","LCN2","MPO","TIMP1","VCAM1",
+                                      "MMP9","CD63","S100A9","ALOX5"))
+
+summary(cutoff)
+
+mcut <- cut(surv.data$MMP9, breaks = c(0, 1.900, Inf), 
+            labels = c('Low', 'High'))
+ccut <- cut(surv.data$CD63, breaks = c(0, 3.652, Inf), 
+            labels = c('Low', 'High'))
+scut <- cut(surv.data$S100A9, breaks = c(0, 0.222, Inf), 
+            labels = c('Low', 'High'))
+acut <- cut(surv.data$ALOX5, breaks = c(0, 5.196, Inf), 
+            labels = c('Low', 'High'))
+
+cut1 <- cut(surv.data$ICAM1, breaks = c(0, 0.938, Inf), 
+            labels = c('Low', 'High'))
+cut2 <- cut(surv.data$CEACAM8, breaks = c(0, 2.165, Inf), 
+            labels = c('Low', 'High'))
+cut3 <- cut(surv.data$ITGAM, breaks = c(0, 6.538, Inf), 
+            labels = c('Low', 'High'))
+cut4 <- cut(surv.data$S100A8, breaks = c(0, 0.439, Inf), 
+            labels = c('Low', 'High'))
+cut5 <- cut(surv.data$ITGB2, breaks = c(0, 2.480, Inf), 
+            labels = c('Low', 'High'))
+cut6 <- cut(surv.data$LCN2, breaks = c(0, 0.751, Inf), 
+            labels = c('Low', 'High'))
+cut7 <- cut(surv.data$MPO, breaks = c(0, 2.626, Inf), 
+            labels = c('Low', 'High'))
+cut8 <- cut(surv.data$TIMP1, breaks = c(0, 14.636, Inf), 
+            labels = c('Low', 'High'))
+cut9 <- cut(surv.data$VCAM1, breaks = c(0, 0.097, Inf), 
+            labels = c('Low', 'High'))
+
+fit <- survfit(Surv(Survival_time, Survival_test)~cut9, data = surv.data)
+
+p <- ggsurvplot(fit, pval=TRUE, surv.median.line = "hv", 
+           palette=c("blue", "red"),
+           legend.title="VCAM1", legend.lab=c('Low','High'),
+           legend=c(0.85,0.15),
+           title="Overall Survival in CPTAC")
+
+a <- ggsurvplot(fit, pval=TRUE, surv.median.line = "hv", 
+           palette=c("blue", "red"),
+           legend.title="ALOX5", legend.lab=c('Low','High'),
+           legend=c(0.85,0.15),
+           ggtheme = theme_bw(),
+           title="Overall Survival in CPTAC")
+
+```
+
+
+#### HSF1 survplot
+```{r}
+library(survminer)
+library(survival)
+library(dplyr)
+library(tibble)
+rb.list <- openxlsx::read.xlsx("./NMF_C1-2-3_DEPs.xlsx", sheet = 4,rowNames = F)
+rb.list <- as.data.frame(rb.list[,1])
+names(rb.list) <- "Symbol" 
+##删除重复name
+rb.list <- rb.list%>% distinct(Symbol, .keep_all = T)
+
+cptac.data <- openxlsx::read.xlsx("./Download data/hcc_prodata_tvsn.xlsx", sheet = 1, rowNames = F)
+
+rb.data <- merge(rb.list, cptac.data, by="Symbol")
+rb.data <- as.data.frame(t(column_to_rownames(rb.data, var = "Symbol")))
+rb.data <- rownames_to_column(rb.data, var = "TumorID")
+
+CPTAC.clinical <- openxlsx::read.xlsx("./Download data/Zhou_Liver_Cancer_ProtemoeMeta.xlsx", sheet = 2, rowNames = F)
+
+surv.data <- merge(CPTAC.clinical[,c(1,24:27)], rb.data, by="TumorID")
+
+cutoff <- surv_cutpoint(surv.data, time = 'Relapse_time', 
+                        event = 'DFS_test', 
+                        variables = c("HSF1"))
+
+summary(cutoff)
+
+mcut <- cut(surv.data$HSF1, breaks = c(0, 6.63, Inf), 
+            labels = c('Low', 'High'))
+fit <- survfit(Surv(Relapse_time, DFS_test)~mcut, data = surv.data)
+
+p <- ggsurvplot(fit, pval=TRUE, surv.median.line = "hv", 
+           palette=c("blue", "red"),
+           legend.title="HSF1", legend.lab=c('Low','High'),
+           title="KM Curve for DFS in CPTAC")
+```
+
+#### PUFA
+```{r}
+library(ggplot2)
+library(ggpubr)
+library(reshape2)
+fa.data <- openxlsx::read.xlsx("./2022ProteomeMetabolism/FA.xlsx", sheet = 1, rowNames = T)
+group <- openxlsx::read.xlsx("./2022ProteomeMetabolism/Metabolites.xlsx", sheet = 7, rowNames = T)
+
+plotdata <- log2(fa.data+1)
+plotdata <- cbind(group[[2]], plotdata)
+names(plotdata) <- c("Group", "FA(20:4)","FA(20:5)", "FA(22:6)")
+
+plotdata <- melt(plotdata, variable.name = "FA")
+
+p <- ggplot(plotdata, aes(x=FA, y=value, fill=Group))+
+  geom_violin(trim = FALSE, color="white", alpha=0.5, scale = "width")+
+  geom_boxplot(width=0.1,position = position_dodge(0.9))+
+  scale_fill_manual(values=c("#085f63","#49beb7","#fccf4d","#ef255f", "grey60"))+
+  theme_bw()+ ylab("Relative Abundance")+xlab("")+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
+```
+
